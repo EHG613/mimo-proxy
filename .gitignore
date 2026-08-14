@@ -13,3 +13,14 @@ build/
 *.swp
 *.swo
 *~
+node_modules/
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log

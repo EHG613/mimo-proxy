@@ -1,0 +1,33 @@
+{
+  "productName": "MiMo Proxy",
+  "version": "2.0.0",
+  "identifier": "dev.mimo.proxy",
+  "build": {
+    "frontendDist": "../src",
+    "beforeBuildCommand": ""
+  },
+  "bundle": {
+    "resources": ["../client"]
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "MiMo Proxy 配置",
+        "label": "config",
+        "width": 820,
+        "height": 600,
+        "minWidth": 680,
+        "minHeight": 520,
+        "resizable": true,
+        "decorations": true,
+        "center": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:*"
+    }
+  },
+  "plugins": {}
+}

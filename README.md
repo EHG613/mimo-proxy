@@ -1,6 +1,36 @@
 # MiMo Reasoning Content Proxy
 
-解决小米 MiMo API 强制要求回传 `reasoning_content` 字段导致 Trae、Cursor 等客户端出现 **400 Param Incorrect** 报错的轻量级代理中间件。
+[English](README.md) | [简体中文](README_CN.md)
+
+A lightweight proxy that solves the MiMo API's `reasoning_content` requirement that causes **400 Param Incorrect** errors in Trae, Cursor, and other clients.
+
+v2.0 introduces a **macOS desktop client** (menu bar app + config window) built with Tauri 2, supporting multiple baseURLs with path-based routing.
+
+## Project Structure
+
+```
+mimo-proxy/
+├── client/                 # Python proxy core (Tauri sidecar)
+│   ├── __init__.py
+│   ├── __main__.py         # Entry: python -m client --cli
+│   ├── config.py           # Config read/write
+│   └── proxy_core.py      # Proxy routing logic
+├── src/                    # Frontend (config window UI)
+│   ├── index.html
+│   ├── style.css
+│   └── app.js
+├── src-tauri/              # Rust backend (tray menu, process management)
+│   ├── Cargo.toml
+│   ├── tauri.conf.json
+│   ├── build.rs
+│   └── src/
+│       ├── lib.rs
+│       └── main.rs
+├── package.json            # npm config
+├── requirements.txt        # Python dependencies
+├── README.md / README_CN.md
+└── LICENSE
+```
 
 ## 问题背景
 
@@ -34,92 +64,98 @@ Trae → MiMo Reasoning Proxy → MiMo API
 2. **注入请求**：当 Trae 发送后续请求时，为缺少 `reasoning_content` 的 assistant 消息自动注入缓存值
 3. **降级处理**：如果缓存未命中（如代理启动前的旧对话），自动剥离 `tool_calls` 避免 400
 
-## 快速开始
+## Quick Start
 
-### 环境要求
+### Requirements
 
-- Python 3.10 或更高版本（推荐 Python 3.12）
-- macOS 用户可通过 Homebrew 安装 Python 3.12：
+- macOS 13+
+- Node.js 18+ (for Tauri)
+- Rust (for Tauri backend)
+- Python 3.10+ (Python 3.12 recommended)
 
 ```bash
+# Install Python 3.12
 brew update
 brew install python@3.12
-```
 
-确认当前 Python 版本：
-
-```bash
+# Verify
 python3 --version
 ```
 
-### 创建虚拟环境并安装依赖
-
-建议始终使用项目虚拟环境。这样可以隔离依赖，也能避免 Homebrew Python 出现 `externally-managed-environment` 错误。
+### Setup
 
 ```bash
+# Create virtual environment and install dependencies
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+
+# Install npm dependencies
+npm install
 ```
 
-以后每次打开新的终端，都需要先进入项目目录并激活虚拟环境：
+### Run
 
 ```bash
-source .venv/bin/activate
+npm run dev     # Dev mode (Tauri dev server + hot reload)
+npm run build   # Production build (generates .app)
 ```
 
-### 启动代理
+## Usage
+
+| Mode | Command | Use Case |
+|------|---------|----------|
+| **GUI Client** (recommended) | `npm run dev` | macOS desktop: menu bar icon + config window |
+| **CLI** | `python -m client --cli` | Foreground uvicorn, reads saved config |
+
+### Config Storage
+
+```
+~/Library/Application Support/MiMoProxy/config.json
+```
+
+Example:
+
+```json
+{
+  "host": "127.0.0.1",
+  "port": 8899,
+  "auto_start": true,
+  "cache_max_size": 2000,
+  "cache_ttl": 7200,
+  "default_name": "default",
+  "endpoints": [
+    {"name": "default", "base_url": "https://one-api-test.liangyihui.net:8080/v1", "enabled": true},
+    {"name": "prod",    "base_url": "https://api.xiaomimimo.com/v1",                "enabled": true}
+  ]
+}
+```
+
+### Path Routing
+
+All endpoints share the same port, differentiated by URL path prefix:
+
+| Request Path | Routes To |
+|-------------|-----------|
+| `/{name}/v1/chat/completions` | Named endpoint's baseURL |
+| `/v1/chat/completions` | **Default** endpoint (backward compatible) |
+| `/` | Status page, lists all endpoints |
+| `/health` | Health check |
+
+### Configure Trae
+
+1. Trae → Settings → Models → Your MiMo custom model
+2. Set **Custom Request URL** to:
+
+```
+http://127.0.0.1:8899/v1/chat/completions              # Default endpoint
+http://127.0.0.1:8899/{name}/v1/chat/completions       # Named endpoint
+```
+
+## Systemd Deployment (Linux Server)
 
 ```bash
-python mimo_proxy.py
-```
-
-默认监听 `0.0.0.0:8899`，上游请求发送至 `https://one-api-test.liangyihui.net:8080/v1`。
-
-如果启动时出现 `ModuleNotFoundError`，请确认虚拟环境已经激活，并重新执行：
-
-```bash
-python -m pip install -r requirements.txt
-```
-
-### 配置 Trae
-
-1. 打开 Trae → 设置 → Models → 你的 MiMo 自定义模型
-2. 将 **Custom Request URL** 改为：
-
-```
-http://127.0.0.1:8899/v1/chat/completions
-```
-
-> ⚠️ **常见错误：**
-> - ❌ `http://0.0.0.0:8899/v1` — `0.0.0.0` 是监听地址，不能用来访问
-> - ❌ `https://127.0.0.1:8899/v1` — https错误的，应写http
-> - ✅ `http://127.0.0.1:8899/v1` — 非完整路径
-> - ✅ `http://127.0.0.1:8899/v1/chat/completions` — 正确格式
-> 如果代理部署在其他机器上，将 `127.0.0.1` 替换为该机器的 IP 地址。
-
-## 配置
-
-编辑 `mimo_proxy.py` 顶部的常量：
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `MIMO_API_BASE` | `https://one-api-test.liangyihui.net:8080/v1` | 上游 OpenAI 兼容 API 根地址 |
-| `LISTEN_HOST` | `0.0.0.0` | 监听地址 |
-| `LISTEN_PORT` | `8899` | 监听端口 |
-| `CACHE_MAX_SIZE` | `2000` | 最大缓存条目数 |
-| `CACHE_TTL` | `7200` | 缓存过期时间（秒） |
-
-如果使用按量付费 API，将 `MIMO_API_BASE` 改为：
-```
-https://api.xiaomimimo.com/v1
-```
-
-## Systemd 服务（可选）
-
-```bash
-# 创建服务文件
-cat > /etc/systemd/system/mimo-proxy.service << 'EOF'
+sudo tee /etc/systemd/system/mimo-proxy.service << 'EOF'
 [Unit]
 Description=MiMo Reasoning Content Proxy
 After=network.target
@@ -127,32 +163,20 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/mimo-proxy
-ExecStart=/usr/bin/python3 /opt/mimo-proxy/mimo_proxy.py
+ExecStart=/usr/bin/python3 -m client --cli
 Restart=always
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
+Environment=MIMO_PROXY_CONFIG_DIR=/etc/mimo-proxy
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# 启动
-systemctl daemon-reload
-systemctl enable --now mimo-proxy
-
-# 查看日志
+sudo systemctl daemon-reload
+sudo systemctl enable --now mimo-proxy
 journalctl -u mimo-proxy -f
 ```
-
-## API 端点
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/` | GET | 状态页（含缓存大小） |
-| `/health` | GET | 健康检查 |
-| `/v1/models` | GET | 代理 MiMo 模型列表 |
-| `/v1/chat/completions` | POST | 代理聊天补全（支持流式） |
-| `/chat/completions` | POST | 同上（兼容路径） |
 
 ## 工作原理
 
@@ -175,11 +199,12 @@ journalctl -u mimo-proxy -f
 └─────────┘                                     └──────────┘
 ```
 
-## 已知限制
+## Limitations
 
-- 缓存基于内存，重启后丢失（新对话会自动重建）
-- 降级处理（剥离 tool_calls）会导致模型丢失工具调用的上下文
-- 仅支持 OpenAI 兼容的 `/v1/chat/completions` 端点
+- Cache is in-memory, lost on restart (new conversations rebuild automatically)
+- Degraded mode (stripping tool_calls) causes the model to lose tool call context
+- Only supports OpenAI-compatible `/v1/chat/completions` endpoint
+- GUI client is macOS only (built on Tauri 2)
 
 ## 邀请码
 我在用 MiMo 开放平台体验 小米顶尖模型 MiMo V2.5等 ，通过我的邀请码注册为新用户，即得 ¥10 API 体验金。邀请码：B8DMC5。注册：https://platform.xiaomimimo.com?ref=B8DMC5（注册后点控制台左下方入口填入，体验金40天有效）

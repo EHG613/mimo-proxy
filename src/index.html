@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MiMo Proxy 配置</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 顶部栏 -->
+    <div id="top-bar">
+      <div class="field-group">
+        <label for="port">监听端口</label>
+        <input type="number" id="port" min="1" max="65535" value="8899">
+      </div>
+      <div id="status" class="stopped">● 已停止</div>
+      <button id="toggle-btn" class="btn primary">启动代理</button>
+    </div>
+
+    <!-- 标题 -->
+    <div id="section-header">
+      <h2>BaseURL 列表</h2>
+      <p class="hint">每个 baseURL 会以 /{名称}/v1/chat/completions 路径暴露。双击表格中的 Name 或 BaseURL 单元格即可编辑。</p>
+    </div>
+
+    <!-- 表格 -->
+    <div id="table-wrapper">
+      <table id="endpoint-table">
+        <thead>
+          <tr>
+            <th class="col-name">名称</th>
+            <th class="col-url">BaseURL</th>
+            <th class="col-default">默认</th>
+            <th class="col-enabled">启用</th>
+            <th class="col-copy">复制</th>
+            <th class="col-delete">删除</th>
+          </tr>
+        </thead>
+        <tbody id="endpoint-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- 添加按钮 -->
+    <button id="add-btn" class="btn accent">＋ 添加 baseURL</button>
+
+    <!-- 底部操作栏 -->
+    <div id="bottom-bar">
+      <button id="reload-btn" class="btn">↻ 重载配置</button>
+      <button id="save-btn" class="btn primary">💾 保存并应用</button>
+    </div>
+  </div>
+
+  <script defer src="app.js"></script>
+</body>
+</html>
