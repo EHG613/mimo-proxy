@@ -38,10 +38,36 @@ Trae → MiMo Reasoning Proxy → MiMo API
 
 ## 快速开始
 
-### 安装依赖
+### 环境要求
+
+- Python 3.10 或更高版本（推荐 Python 3.12）
+- macOS 用户可通过 Homebrew 安装 Python 3.12：
 
 ```bash
-pip install fastapi uvicorn httpx
+brew update
+brew install python@3.12
+```
+
+确认当前 Python 版本：
+
+```bash
+python3 --version
+```
+
+### 创建虚拟环境并安装依赖
+
+建议始终使用项目虚拟环境。这样可以隔离依赖，也能避免 Homebrew Python 出现 `externally-managed-environment` 错误。
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
+
+以后每次打开新的终端，都需要先进入项目目录并激活虚拟环境：
+
+```bash
+source .venv/bin/activate
 ```
 
 ### 启动代理
@@ -50,7 +76,13 @@ pip install fastapi uvicorn httpx
 python mimo_proxy.py
 ```
 
-默认监听 `0.0.0.0:8899`，上游指向 Token Plan API。
+默认监听 `0.0.0.0:8899`，上游请求发送至 `https://one-api-test.liangyihui.net:8080/v1`。
+
+如果启动时出现 `ModuleNotFoundError`，请确认虚拟环境已经激活，并重新执行：
+
+```bash
+python -m pip install -r requirements.txt
+```
 
 ### 配置 Trae
 
@@ -77,7 +109,7 @@ http://127.0.0.1:8899/v1/chat/completions
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `MIMO_API_BASE` | `https://token-plan-cn.xiaomimimo.com/v1` | MiMo API 地址（Token Plan） |
+| `MIMO_API_BASE` | `https://one-api-test.liangyihui.net:8080/v1` | 上游 OpenAI 兼容 API 根地址 |
 | `LISTEN_HOST` | `0.0.0.0` | 监听地址 |
 | `LISTEN_PORT` | `8899` | 监听端口 |
 | `CACHE_MAX_SIZE` | `2000` | 最大缓存条目数 |

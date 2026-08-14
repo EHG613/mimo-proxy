@@ -21,7 +21,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
 # ─── 配置 ──────────────────────────────────────────────────────
-MIMO_API_BASE = "https://token-plan-cn.xiaomimimo.com/v1"
+MIMO_API_BASE = "https://one-api-test.liangyihui.net:8080/v1"
 LISTEN_HOST = "0.0.0.0"
 LISTEN_PORT = 8899
 CACHE_MAX_SIZE = 2000
