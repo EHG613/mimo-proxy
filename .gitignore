@@ -19,6 +19,9 @@ node_modules/
 src-tauri/target/
 src-tauri/gen/
 
+# PyInstaller sidecar 构建产物
+src-tauri/resources/
+
 # macOS
 .DS_Store
 

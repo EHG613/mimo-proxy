@@ -122,7 +122,7 @@ def main() -> int:
     manager = ConfigManager()
     cfg = manager.get()
     if not cfg.endpoints:
-        print("未配置任何 endpoint，请先在 ~/Library/Application Support/MiMoProxy/config.json 中添加。", file=sys.stderr)
+        print("未配置任何 endpoint，请先在 ~/.mimo-proxy/config.json 中添加。", file=sys.stderr)
         return 1
 
     app = create_app(cfg)

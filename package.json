@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
-    "build": "tauri build",
-    "preview": "tauri preview"
+    "build:sidecar": "bash scripts/build-sidecar.sh",
+    "build:dmg": "bash scripts/build-dmg.sh",
+    "build": "npm run build:sidecar && tauri build"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

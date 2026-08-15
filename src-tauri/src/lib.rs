@@ -62,10 +62,18 @@ pub struct AppState {
 
 fn config_path() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    let path = std::path::PathBuf::from(home)
-        .join("Library/Application Support/MiMoProxy");
-    std::fs::create_dir_all(&path).ok();
-    path.join("config.json")
+    let dir = std::path::PathBuf::from(&home).join(".mimo-proxy");
+    std::fs::create_dir_all(&dir).ok();
+    let cfg = dir.join("config.json");
+    // 一次性迁移：旧版目录为 ~/Library/Application Support/MiMoProxy（保留不删，作为回滚备份）
+    if !cfg.exists() {
+        let legacy = std::path::PathBuf::from(&home)
+            .join("Library/Application Support/MiMoProxy/config.json");
+        if legacy.exists() {
+            let _ = std::fs::copy(&legacy, &cfg);
+        }
+    }
+    cfg
 }
 
 fn load_config() -> ProxyConfig {
@@ -144,38 +152,47 @@ fn start_proxy(app: AppHandle) -> Result<(), String> {
         .parent()
         .unwrap()
         .to_path_buf();
-    // 生产包将 client 作为资源放入 resource_dir/client；开发时使用仓库目录。
-    let client_dir = app
-        .path()
-        .resource_dir()
-        .ok()
-        .map(|dir| dir.join("client"))
-        .filter(|dir| dir.join("__main__.py").exists())
-        .unwrap_or_else(|| repo_dir.join("client"));
-    let work_dir = client_dir
-        .parent()
-        .ok_or_else(|| "代理资源目录无效".to_string())?
-        .to_path_buf();
 
-    // 使用项目目录下的 .venv/bin/python，回退到系统 python3。
-    let venv_python = repo_dir.join(".venv/bin/python");
-    let python = if venv_python.exists() {
-        venv_python
-    } else {
-        std::path::PathBuf::from("python3")
+    // sidecar 解析：开发用仓库 .venv 直跑 client 源码（改 Python 代码无需重新打包）；
+    // 生产包用 PyInstaller 独立可执行文件（Resources/sidecar/mimo-proxy-sidecar/）。
+    // 注意顺序不能反：tauri dev 的 resource_dir 也能命中 src-tauri/resources，
+    // 若 sidecar 优先会导致 dev 永远跑旧二进制。
+    let mut cmd = {
+        let venv_python = repo_dir.join(".venv/bin/python");
+        if venv_python.exists() {
+            let mut c = Command::new(&venv_python);
+            c.args(["-m", "client", "--cli"])
+                .current_dir(&repo_dir)
+                .env("PYTHONPATH", &repo_dir);
+            c
+        } else {
+            let sidecar_bin = app
+                .path()
+                .resource_dir()
+                .ok()
+                .map(|dir| dir.join("sidecar/mimo-proxy-sidecar/mimo-proxy-sidecar"))
+                .filter(|p| p.is_file());
+            if let Some(bin) = sidecar_bin {
+                let mut c = Command::new(&bin);
+                c.args(["--cli"]).current_dir(bin.parent().unwrap_or(std::path::Path::new("/")));
+                c
+            } else {
+                return Err(
+                    "未找到代理 sidecar：开发环境缺少 .venv/bin/python，生产包缺少 resources/sidecar（运行 npm run build:sidecar 重新打包）"
+                        .into(),
+                );
+            }
+        }
     };
 
-    let child = Command::new(&python)
-        .args(["-m", "client", "--cli"])
+    let child = cmd
         // stdin 接管道但从不写入：本应用终止（含被强杀）时内核关闭管道写端，
         // sidecar 读到 EOF 立即退出，零延迟清理；sidecar 另有 ppid watchdog 轮询兜底。
         // 注意：写端 fd 由 Child 句柄持有，句柄存活期间管道保持打开。
         .stdin(Stdio::piped())
-        .current_dir(&work_dir)
-        .env("PYTHONPATH", &work_dir)
         .env("MIMO_PROXY_CONFIG_DIR", config_dir.to_string_lossy().to_string())
         .spawn()
-        .map_err(|e| format!("启动代理失败 ({}): {}", python.display(), e))?;
+        .map_err(|e| format!("启动代理失败: {}", e))?;
 
     st.child = Some(child);
     drop(st);

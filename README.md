@@ -97,9 +97,12 @@ npm install
 ### Run
 
 ```bash
-npm run dev     # Dev mode (Tauri dev server + hot reload)
-npm run build   # Production build (generates .app)
+npm run dev            # Dev mode (Tauri dev server + hot reload, sidecar runs from .venv)
+npm run build:sidecar  # Build the Python sidecar only (PyInstaller standalone binary)
+npm run build          # Production build (sidecar first, then .app / .dmg)
 ```
+
+The bundle ships its own Python runtime (`src-tauri/resources/sidecar/`) — no system Python required after install.
 
 ## Usage
 
@@ -111,7 +114,7 @@ npm run build   # Production build (generates .app)
 ### Config Storage
 
 ```
-~/Library/Application Support/MiMoProxy/config.json
+~/.mimo-proxy/config.json
 ```
 
 Example:

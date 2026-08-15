@@ -99,9 +99,12 @@ python -m pip install -r requirements.txt
 ### 启动
 
 ```bash
-npm run dev     # 开发模式（Tauri dev server + 热更新）
-npm run build   # 生产构建（生成 .app）
+npm run dev            # 开发模式（Tauri dev server + 热更新，sidecar 走 .venv 源码）
+npm run build:sidecar  # 单独构建 Python sidecar（PyInstaller 独立可执行文件）
+npm run build          # 生产构建（先构建 sidecar，再生成 .app / .dmg）
 ```
+
+打包产物自带 Python 运行时（`src-tauri/resources/sidecar/`），安装后不依赖系统 Python。
 
 启动后菜单栏会出现 ● 图标，自动按上次配置启动代理（可在配置窗口关闭 auto_start）。
 
@@ -111,7 +114,7 @@ npm run build   # 生产构建（生成 .app）
 - **启动代理 / 停止代理**: 一键启停
 - **打开配置窗口…**: 弹出独立窗口管理端口与 endpoints
 - **Endpoints**: 子菜单列出所有 baseURL，点击直接浏览器打开 `/{name}/v1/models` 验证
-- **在 Finder 中打开配置目录**: 直接定位到 `~/Library/Application Support/MiMoProxy/`
+- **在 Finder 中打开配置目录**: 直接定位到 `~/.mimo-proxy/`
 - **退出**: 同时停止代理与菜单栏 App
 
 ### 配置窗口
@@ -130,7 +133,7 @@ npm run build   # 生产构建（生成 .app）
 配置文件路径：
 
 ```
-~/Library/Application Support/MiMoProxy/config.json
+~/.mimo-proxy/config.json
 ```
 
 可通过环境变量 `MIMO_PROXY_CONFIG_DIR` 覆盖（用于测试或自定义部署）。
@@ -214,7 +217,7 @@ http://127.0.0.1:8899/prod/v1/chat/completions         # 指定 endpoint
 python -m client --cli
 ```
 
-直接读取 `~/Library/Application Support/MiMoProxy/config.json` 在前台运行 uvicorn，不启动菜单栏。适合服务器/SSH 场景。
+直接读取 `~/.mimo-proxy/config.json` 在前台运行 uvicorn，不启动菜单栏。适合服务器/SSH 场景。
 
 ## Systemd 服务部署（Linux 服务器）
 

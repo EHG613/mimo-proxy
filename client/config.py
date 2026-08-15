@@ -1,4 +1,4 @@
-"""配置管理：读写 ~/Library/Application Support/MiMoProxy/config.json。
+"""配置管理：读写 ~/.mimo-proxy/config.json。
 
 配置结构示例::
 
@@ -35,19 +35,19 @@ from pathlib import Path
 from typing import Callable
 
 
-def _app_support_dir() -> Path:
-    # 优先环境变量（用于测试 / 自定义部署）
+def _config_dir() -> Path:
+    # 优先环境变量（Tauri 应用传入 / 用于测试 / 自定义部署）
     env_override = os.environ.get("MIMO_PROXY_CONFIG_DIR")
     if env_override:
         path = Path(env_override).expanduser()
     else:
         home = os.path.expanduser("~")
-        path = Path(home) / "Library" / "Application Support" / "MiMoProxy"
+        path = Path(home) / ".mimo-proxy"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-CONFIG_PATH = _app_support_dir() / "config.json"
+CONFIG_PATH = _config_dir() / "config.json"
 
 _NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
