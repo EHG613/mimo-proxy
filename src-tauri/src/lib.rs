@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::{
-    menu::{MenuBuilder, MenuItemBuilder},
+    menu::{MenuBuilder, MenuItem, MenuItemBuilder},
     tray::{MouseButton, TrayIcon, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager,
 };
@@ -53,6 +53,9 @@ impl Default for ProxyConfig {
 pub struct AppState {
     pub child: Option<Child>,
     pub tray: Option<TrayIcon>,
+    // 托盘菜单项句柄：状态文本和启动/停止按钮需要跟随代理状态刷新
+    pub status_item: Option<MenuItem<tauri::Wry>>,
+    pub toggle_item: Option<MenuItem<tauri::Wry>>,
 }
 
 // ─── 配置读写 ───
@@ -87,20 +90,29 @@ fn save_config(cfg: &ProxyConfig) {
 // ─── 托盘菜单更新 ───
 
 fn update_tray(app: &AppHandle) {
-    let state = app.state::<Mutex<AppState>>();
-    let running = state.lock().map(|s| s.child.is_some()).unwrap_or(false);
     let cfg = load_config();
-
+    let state = app.state::<Mutex<AppState>>();
     if let Ok(st) = state.lock() {
+        let running = st.child.is_some();
+        // 刷新菜单项文本：状态行 + 启动/停止按钮（只改 tooltip 会导致菜单永远停在初始文案）
+        if let Some(ref item) = st.status_item {
+            let _ = item.set_text(if running {
+                format!("状态: 运行中 :{}", cfg.port)
+            } else {
+                "状态: 已停止".to_string()
+            });
+        }
+        if let Some(ref item) = st.toggle_item {
+            let _ = item.set_text(if running { "停止代理" } else { "启动代理" });
+        }
         if let Some(ref tray) = st.tray {
             tray.set_icon_as_template(true).ok();
-            tray.set_tooltip(Some(
-                if running {
-                    format!("MiMo Proxy - 运行中 :{}", cfg.port)
-                } else {
-                    "MiMo Proxy - 已停止".into()
-                }
-            )).ok();
+            tray.set_tooltip(Some(if running {
+                format!("MiMo Proxy - 运行中 :{}", cfg.port)
+            } else {
+                "MiMo Proxy - 已停止".into()
+            }))
+            .ok();
         }
     };
 }
@@ -155,6 +167,10 @@ fn start_proxy(app: AppHandle) -> Result<(), String> {
 
     let child = Command::new(&python)
         .args(["-m", "client", "--cli"])
+        // stdin 接管道但从不写入：本应用终止（含被强杀）时内核关闭管道写端，
+        // sidecar 读到 EOF 立即退出，零延迟清理；sidecar 另有 ppid watchdog 轮询兜底。
+        // 注意：写端 fd 由 Child 句柄持有，句柄存活期间管道保持打开。
+        .stdin(Stdio::piped())
         .current_dir(&work_dir)
         .env("PYTHONPATH", &work_dir)
         .env("MIMO_PROXY_CONFIG_DIR", config_dir.to_string_lossy().to_string())
@@ -165,27 +181,35 @@ fn start_proxy(app: AppHandle) -> Result<(), String> {
     drop(st);
 
     // 后台线程监控进程退出（轮询方式，避免持有锁阻塞）
+    // 注意：判断与清空必须在同一次锁内完成，否则可能与 start_proxy 竞态，
+    // 把新启动的子进程句柄误清空（进程泄漏、UI 显示已停止但端口仍被占用）。
     let monitor_app = app.clone();
     std::thread::spawn(move || {
         loop {
-            let state = monitor_app.state::<Mutex<AppState>>();
-            let exited = if let Ok(mut st) = state.lock() {
-                if let Some(ref mut child) = st.child {
-                    child.try_wait().ok().flatten().is_some()
-                } else {
-                    true
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let exited = {
+                let state = monitor_app.state::<Mutex<AppState>>();
+                let Ok(mut st) = state.lock() else { break };
+                match st.child.as_mut() {
+                    Some(child) => {
+                        if child.try_wait().ok().flatten().is_some() {
+                            // 同一把锁内确认退出并清空，避免 TOCTOU
+                            st.child = None;
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    // 已被 stop_proxy 接管（它自己会发事件），安静退出，
+                    // 避免基于过期观察补发 proxy-status:false 覆盖新状态
+                    None => break,
                 }
-            } else {
-                true
             };
             if exited {
-                if let Ok(mut st) = monitor_app.state::<Mutex<AppState>>().lock() {
-                    st.child = None;
-                }
                 let _ = monitor_app.emit("proxy-status", false);
+                update_tray(&monitor_app);
                 break;
             }
-            std::thread::sleep(std::time::Duration::from_millis(500));
         }
     });
 
@@ -196,12 +220,19 @@ fn start_proxy(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn stop_proxy(app: AppHandle) -> Result<(), String> {
-    let state = app.state::<Mutex<AppState>>();
-    let mut st = state.lock().map_err(|e| e.to_string())?;
-    if let Some(mut child) = st.child.take() {
-        child.kill().map_err(|e| format!("停止代理失败: {}", e))?;
+    let child = {
+        let state = app.state::<Mutex<AppState>>();
+        let mut st = state.lock().map_err(|e| e.to_string())?;
+        st.child.take()
+    };
+    if let Some(mut child) = child {
+        // kill/wait 放在锁外执行，避免持锁阻塞 UI；
+        // 即使 kill 失败（如进程已退出）也继续 wait 回收，不向调用方抛错导致状态不同步
+        if let Err(e) = child.kill() {
+            eprintln!("停止代理 kill 失败: {}", e);
+        }
+        let _ = child.wait();
     }
-    drop(st); // 必须在调用 update_tray 前释放锁，否则 update_tray 内 lock() 会死锁
     let _ = app.emit("proxy-status", false);
     update_tray(&app);
     Ok(())
@@ -228,6 +259,8 @@ pub fn run() {
         .manage(Mutex::new(AppState {
             child: None,
             tray: None,
+            status_item: None,
+            toggle_item: None,
         }))
         .invoke_handler(tauri::generate_handler![
             get_config,
@@ -308,11 +341,13 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // 存储 tray 句柄
+            // 存储 tray 与菜单项句柄
             {
                 let state = app.state::<Mutex<AppState>>();
                 if let Ok(mut st) = state.lock() {
                     st.tray = Some(tray);
+                    st.status_item = Some(status_item);
+                    st.toggle_item = Some(toggle_item);
                 };
             }
 
@@ -340,14 +375,29 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
-                // 退出时清理 Python sidecar
-                let state = app.state::<Mutex<AppState>>();
-                if let Ok(mut st) = state.lock() {
-                    if let Some(mut child) = st.child.take() {
-                        let _ = child.kill();
+            match event {
+                // macOS：点击程序坞图标（或 Finder 重新打开）时，显示并聚焦配置窗口。
+                // 窗口平时是 hide() 隐藏的，不处理 Reopen 就会表现为"点了没反应"
+                tauri::RunEvent::Reopen { .. } => {
+                    if let Some(window) = app.get_webview_window("config") {
+                        let _ = window.unminimize();
+                        window.show().ok();
+                        window.set_focus().ok();
                     }
-                }; // 分号确保 MutexGuard 在 state 之前释放
+                }
+                tauri::RunEvent::Exit => {
+                    // 退出时清理 Python sidecar（锁外 kill，避免持锁阻塞）
+                    let child = app
+                        .state::<Mutex<AppState>>()
+                        .lock()
+                        .ok()
+                        .and_then(|mut st| st.child.take());
+                    if let Some(mut child) = child {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                    }
+                }
+                _ => {}
             }
         });
 }

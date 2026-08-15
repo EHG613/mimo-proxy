@@ -182,6 +182,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   updateStatus($status, $toggleBtn, config.port);
 
   // ─── 按钮事件 ───
+
+  // 操作成功后在按钮上短暂显示结果，避免"点了没反应"的观感
+  function flashBtn(btn, text, ms = 1600) {
+    const orig = btn.textContent;
+    btn.textContent = text;
+    btn.disabled = true;
+    setTimeout(() => {
+      btn.textContent = orig;
+      btn.disabled = false;
+    }, ms);
+  }
+
   $toggleBtn.addEventListener("click", async () => {
     $toggleBtn.disabled = true;
     try {
@@ -216,8 +228,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   $reloadBtn.addEventListener("click", async () => {
-    config = await invoke("get_config");
-    renderAll($port, $status, $toggleBtn, $tbody);
+    try {
+      config = await invoke("get_config");
+      renderAll($port, $status, $toggleBtn, $tbody);
+      flashBtn($reloadBtn, "✓ 已重载");
+    } catch (e) {
+      console.error(e);
+      alert(`重载失败: ${e}`);
+    }
   });
 
   $saveBtn.addEventListener("click", async () => {
@@ -250,14 +268,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     try {
+      const wasRunning = proxyRunning;
+      $saveBtn.disabled = true;
       config = await invoke("save_config_cmd", { cfg: config });
-      if (proxyRunning) {
+      if (wasRunning) {
         await invoke("restart_proxy");
       }
       renderAll($port, $status, $toggleBtn, $tbody);
+      flashBtn($saveBtn, wasRunning ? "✓ 已保存并应用" : "✓ 已保存（启动后生效）");
     } catch (e) {
       console.error(e);
       alert(`保存失败: ${e}`);
+      $saveBtn.disabled = false;
     }
   });
 

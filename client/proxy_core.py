@@ -14,13 +14,16 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import hashlib
 import json
 import logging
+import random
+import re
 import time
 from collections import OrderedDict
 from contextlib import asynccontextmanager
-from typing import Iterable
+from typing import AsyncIterator, Iterable
 
 import httpx
 from starlette.applications import Starlette
@@ -31,6 +34,69 @@ from starlette.routing import Route
 from .config import Config, Endpoint
 
 log = logging.getLogger("mimo-proxy")
+
+# ─── 上游错误分类与重试策略 ────────────────────────────────────
+# 目标：吸收中转站（new-api 系网关）的瞬时上游错误，对客户端透明；
+# 不可恢复错误以真实 HTTP 状态码返回，避免客户端把错误流当成空响应。
+
+RETRY_MAX_ATTEMPTS = 3          # 总尝试次数
+RETRY_BACKOFF_BASE_S = 1.0      # 指数退避基数：1s / 2s，±30% 随机抖动
+RETRYABLE_STATUSES = {408, 429, 500, 502, 503, 504, 529}
+FATAL_STATUSES = {401, 403, 404, 413}
+_TRANSIENT_RE = re.compile(
+    r"upstream service temporarily unavailable|temporarily unavailable"
+    r"|upstream_error|bad gateway|service overloaded|overloaded",
+    re.IGNORECASE,
+)
+
+
+def _classify_upstream_failure(status: int, body_text: str) -> str:
+    """判断上游失败类型：retry（瞬时，可重试）或 fatal（不可恢复）。"""
+    if status in RETRYABLE_STATUSES:
+        return "retry"
+    # 覆盖 new-api 把瞬时上游错误包进 4xx 的情况（401/403/404 除外，明确不可重试）
+    if status not in FATAL_STATUSES and _TRANSIENT_RE.search(body_text or ""):
+        return "retry"
+    if status >= 500:
+        return "retry"
+    return "fatal"
+
+
+class UpstreamError(Exception):
+    """上游不可恢复错误：携带真实状态码与错误 payload，由端点转成 JSONResponse。"""
+
+    def __init__(self, status_code: int, payload: dict):
+        super().__init__(f"upstream {status_code}")
+        self.status_code = status_code
+        self.payload = payload
+
+
+def _error_payload(status: int, body_text: str) -> dict:
+    """把上游错误体规整成 OpenAI 风格 payload；JSON 错误体原样保留。"""
+    try:
+        data = json.loads(body_text)
+        if isinstance(data, dict) and "error" in data:
+            return data
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return {"error": {"message": (body_text or "")[:500] or f"upstream {status}", "code": str(status)}}
+
+
+async def _retry_sleep(attempt: int) -> None:
+    """attempt 从 0 开始：第 1 次重试前睡 ~1s，第 2 次前睡 ~2s，带 ±30% 抖动。"""
+    delay = RETRY_BACKOFF_BASE_S * (2 ** attempt) * random.uniform(0.7, 1.3)
+    log.info("🔁 retrying in %.1fs (attempt %d/%d)", delay, attempt + 2, RETRY_MAX_ATTEMPTS)
+    await asyncio.sleep(delay)
+
+
+async def _give_up_or_retry(resp: httpx.Response | None, status: int, body_text: str, attempt: int) -> None:
+    """关闭上游响应；瞬时错误且还有次数时退避等待（返回后由调用方重试），否则抛 UpstreamError。"""
+    if resp is not None:
+        await resp.aclose()
+    if _classify_upstream_failure(status, body_text) == "retry" and attempt < RETRY_MAX_ATTEMPTS - 1:
+        await _retry_sleep(attempt)
+        return
+    raise UpstreamError(status, _error_payload(status, body_text))
 
 # ─── 共享缓存 ──────────────────────────────────────────────────
 _cache: "OrderedDict[str, tuple[str, float]]" = OrderedDict()
@@ -89,7 +155,12 @@ def cache_stats() -> dict:
 # ─── 核心逻辑 ──────────────────────────────────────────────────
 
 def inject_reasoning(messages: list[dict], ttl: int, max_size: int) -> tuple[int, int]:
-    """处理 assistant 消息：有缓存则注入 reasoning_content，无缓存则剥离 tool_calls 降级。"""
+    """处理 assistant 消息：有缓存则注入 reasoning_content，无缓存则注入占位符。
+
+    注意：始终保留 tool_calls——删除 tool_calls 会留下孤儿 role:tool 消息，
+    导致上游返回 400（消息序列非法）。占位 reasoning_content 同样满足
+    MiMo 上游"带 tool_calls 的 assistant 消息必须携带 reasoning_content"的约束。
+    """
     injected = 0
     degraded = 0
 
@@ -110,16 +181,9 @@ def inject_reasoning(messages: list[dict], ttl: int, max_size: int) -> tuple[int
             log.info("✅ Injected reasoning_content into msg[%d] [%s] (%d chars)", i, h[:8], len(cached))
         else:
             tc_ids = _extract_tool_call_ids(msg)
-            log.warning("⚠️  No cache for msg[%d] [%s] tool_call_ids=%s → degrading to plain text",
+            log.warning("⚠️  No cache for msg[%d] [%s] tool_call_ids=%s → injected placeholder reasoning_content",
                         i, h[:8], tc_ids)
-            original_content = msg.get("content") or ""
-            tc_summary = []
-            for tc in msg.get("tool_calls") or []:
-                fn = tc.get("function", {})
-                tc_summary.append(f"[Called {fn.get('name', '?')}]")
-            if tc_summary:
-                msg["content"] = original_content + " " + " ".join(tc_summary)
-            del msg["tool_calls"]
+            msg["reasoning_content"] = "(reasoning unavailable)"
             degraded += 1
 
     return injected, degraded
@@ -174,100 +238,178 @@ def _sse(data: str) -> bytes:
     return f"data: {data}\n\n".encode("utf-8")
 
 
-async def _stream_proxy(client: httpx.AsyncClient, url: str, headers: dict, body: dict, max_size: int):
+def _first_frame_error_text(event_text: str) -> str | None:
+    """若首个 SSE 事件的 data 是 error 帧（JSON 含 error 键且无 choices），返回其原文，否则 None。"""
+    for line in event_text.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line[5:].strip()
+        if not payload or payload == "[DONE]":
+            return None
+        try:
+            chunk = json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(chunk, dict) and "error" in chunk and "choices" not in chunk:
+            return json.dumps(chunk, ensure_ascii=False)
+        return None
+    return None
+
+
+async def _open_upstream_stream(
+    client: httpx.AsyncClient, url: str, headers: dict, body: dict,
+) -> tuple[httpx.Response, AsyncIterator[bytes], bytes]:
+    """建立上游流：状态码检查 + 首帧嗅探 + 瞬时错误退避重试。
+
+    在向客户端写出任何字节之前完成，因此可以：
+    - 对可重试错误（5xx/429/网络异常/流内首帧 error）自动重试，对客户端透明；
+    - 对不可恢复错误抛 UpstreamError（真实状态码），由端点返回 JSONResponse。
+
+    返回 (仍处于流式打开状态的 response, 可续传的字节迭代器, 已预读的首段字节)；
+    response 与迭代器的关闭由 _forward_stream 负责。
+    注意：httpx 的 aiter_bytes() 只能消费一次，因此预读与续传必须共用同一迭代器对象。
+    """
+    for attempt in range(RETRY_MAX_ATTEMPTS):
+        resp: httpx.Response | None = None
+        try:
+            req = client.build_request("POST", url, headers=headers, json=body)
+            resp = await client.send(req, stream=True)
+
+            if resp.status_code != 200:
+                error_text = (await resp.aread()).decode("utf-8", errors="replace")
+                log.warning("⚠️ Stream upstream %d (attempt %d/%d): %s",
+                            resp.status_code, attempt + 1, RETRY_MAX_ATTEMPTS, error_text[:200])
+                await _give_up_or_retry(resp, resp.status_code, error_text, attempt)
+                continue
+
+            # 200：预读首个完整 SSE 事件，嗅探流内 error 帧
+            byte_iter = resp.aiter_bytes()
+            buf = b""
+            got_event = False
+            async for raw in byte_iter:
+                buf += raw
+                if b"\n\n" in buf or b"[DONE]" in buf:
+                    got_event = True
+                    break
+            if not got_event:
+                log.warning("⚠️ Stream upstream empty (attempt %d/%d)", attempt + 1, RETRY_MAX_ATTEMPTS)
+                await _give_up_or_retry(resp, 502, "upstream returned empty stream", attempt)
+                continue
+
+            err_text = _first_frame_error_text(buf.decode("utf-8", errors="replace"))
+            if err_text is not None:
+                log.warning("⚠️ Stream first-frame error (attempt %d/%d): %s",
+                            attempt + 1, RETRY_MAX_ATTEMPTS, err_text[:200])
+                await _give_up_or_retry(resp, 502, err_text, attempt)
+                continue
+
+            return resp, byte_iter, buf
+
+        except UpstreamError:
+            raise
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as e:
+            log.warning("⚠️ Stream network error (attempt %d/%d): %s", attempt + 1, RETRY_MAX_ATTEMPTS, e)
+            if resp is not None:
+                await resp.aclose()
+            if attempt < RETRY_MAX_ATTEMPTS - 1:
+                await _retry_sleep(attempt)
+                continue
+            raise UpstreamError(502, {"error": {"message": f"network error after retries: {e}", "code": "502"}})
+
+    raise UpstreamError(502, {"error": {"message": "upstream unavailable", "code": "502"}})
+
+
+async def _forward_stream(resp: httpx.Response, byte_iter: AsyncIterator[bytes], first: bytes, max_size: int):
+    """转发上游 SSE 流：累积 reasoning/tool_calls 并在 [DONE] 时写缓存。
+
+    首段字节 first 由 _open_upstream_stream 预读传入（保证重试判断发生在
+    写出之前）；累积器在生成器内初始化，天然按"成功响应"隔离。
+    流中途故障（已向客户端转发过数据）不重试，以合法 SSE 收尾，避免内容重复。
+    """
     acc_content = ""
     acc_reasoning = ""
     acc_tool_calls: list[dict] = []
 
-    last_error = None
-    for attempt in range(3):
-        try:
-            async with client.stream("POST", url, headers=headers, json=body) as resp:
-                if resp.status_code != 200:
-                    error_body = await resp.aread()
-                    error_text = error_body.decode("utf-8", errors="replace")
-                    log.warning("⚠️ Stream upstream %d (attempt %d): %s", resp.status_code, attempt + 1, error_text[:200])
-                    if resp.status_code < 500:
-                        yield _sse(error_text)
-                        return
-                    last_error = error_text
-                    if attempt < 2:
-                        await asyncio.sleep(1 * (attempt + 1))
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    buffer = ""
+
+    async def _chunks():
+        # 预读的首段作为第一个数据块，续传共用同一迭代器（httpx 限制只能消费一次）
+        if first:
+            yield first
+        async for raw in byte_iter:
+            yield raw
+
+    try:
+        async for raw_chunk in _chunks():
+            buffer += decoder.decode(raw_chunk)
+
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                line = line.rstrip("\r")
+
+                if line.startswith("data: "):
+                    payload = line[6:].strip()
+
+                    if payload == "[DONE]":
+                        if acc_reasoning and (acc_content or acc_tool_calls):
+                            synthetic = {
+                                "role": "assistant",
+                                "content": acc_content,
+                                "tool_calls": acc_tool_calls,
+                                "reasoning_content": acc_reasoning,
+                            }
+                            h = _msg_hash(synthetic)
+                            tc_ids = _extract_tool_call_ids(synthetic)
+                            _cache_set_with_index(h, acc_reasoning, tc_ids, max_size)
+                            log.info("📦 Cached streaming reasoning [%s] (%d chars)", h[:8], len(acc_reasoning))
+                        yield _sse("[DONE]")
                         continue
-                    yield _sse(json.dumps({"error": {"message": f"MiMo API error after retries: {last_error[:200]}", "code": "502"}}))
-                    return
 
-                buffer = ""
-                async for raw_chunk in resp.aiter_bytes():
-                    buffer += raw_chunk.decode("utf-8", errors="replace")
+                    try:
+                        chunk = json.loads(payload)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        rc = delta.get("reasoning_content")
+                        if rc:
+                            acc_reasoning += rc
+                        c = delta.get("content")
+                        if c:
+                            acc_content += c
+                        for tc in delta.get("tool_calls") or []:
+                            idx = tc.get("index", 0)
+                            while len(acc_tool_calls) <= idx:
+                                acc_tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+                            if tc.get("id"):
+                                acc_tool_calls[idx]["id"] = tc["id"]
+                            fn = tc.get("function", {})
+                            if fn.get("name"):
+                                acc_tool_calls[idx]["function"]["name"] += fn["name"]
+                            if fn.get("arguments"):
+                                acc_tool_calls[idx]["function"]["arguments"] += fn["arguments"]
+                    except (json.JSONDecodeError, IndexError, KeyError):
+                        pass
 
-                    while "\n" in buffer:
-                        line, buffer = buffer.split("\n", 1)
-                        line = line.rstrip("\r")
+                    yield _sse(payload)
 
-                        if line.startswith("data: "):
-                            payload = line[6:].strip()
+                elif line.strip() == "":
+                    yield b"\n"
+                elif line.startswith(":"):
+                    yield (line + "\n\n").encode("utf-8")
+                else:
+                    yield (line + "\n").encode("utf-8")
 
-                            if payload == "[DONE]":
-                                if acc_reasoning and (acc_content or acc_tool_calls):
-                                    synthetic = {
-                                        "role": "assistant",
-                                        "content": acc_content,
-                                        "tool_calls": acc_tool_calls,
-                                        "reasoning_content": acc_reasoning,
-                                    }
-                                    h = _msg_hash(synthetic)
-                                    tc_ids = _extract_tool_call_ids(synthetic)
-                                    _cache_set_with_index(h, acc_reasoning, tc_ids, max_size)
-                                    log.info("📦 Cached streaming reasoning [%s] (%d chars)", h[:8], len(acc_reasoning))
-                                yield _sse("[DONE]")
-                                continue
-
-                            try:
-                                chunk = json.loads(payload)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                rc = delta.get("reasoning_content")
-                                if rc:
-                                    acc_reasoning += rc
-                                c = delta.get("content")
-                                if c:
-                                    acc_content += c
-                                for tc in delta.get("tool_calls") or []:
-                                    idx = tc.get("index", 0)
-                                    while len(acc_tool_calls) <= idx:
-                                        acc_tool_calls.append({"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
-                                    if tc.get("id"):
-                                        acc_tool_calls[idx]["id"] = tc["id"]
-                                    fn = tc.get("function", {})
-                                    if fn.get("name"):
-                                        acc_tool_calls[idx]["function"]["name"] += fn["name"]
-                                    if fn.get("arguments"):
-                                        acc_tool_calls[idx]["function"]["arguments"] += fn["arguments"]
-                            except (json.JSONDecodeError, IndexError, KeyError):
-                                pass
-
-                            yield _sse(payload)
-
-                        elif line.strip() == "":
-                            yield b"\n"
-                        elif line.startswith(":"):
-                            yield (line + "\n\n").encode("utf-8")
-                        else:
-                            yield (line + "\n").encode("utf-8")
-                return
-
-        except httpx.TimeoutException as e:
-            log.warning("⚠️ Stream timeout (attempt %d): %s", attempt + 1, e)
-            last_error = str(e)
-            if attempt < 2:
-                await asyncio.sleep(2 * (attempt + 1))
-                continue
-        except Exception as e:
-            log.error("❌ Stream error: %s", e, exc_info=True)
-            yield _sse(json.dumps({"error": f"Proxy error: {e}"}))
-            return
-
-    yield _sse(json.dumps({"error": {"message": f"Stream error after retries: {last_error}", "code": "502"}}))
+    except (httpx.TimeoutException, httpx.RemoteProtocolError) as e:
+        # 已向客户端转发过数据 → 不能重试（会造成内容重复），干净收尾
+        log.error("❌ Stream aborted mid-flight: %s", e)
+        yield _sse(json.dumps({"error": {"message": f"upstream stream aborted: {e}", "code": "502"}}))
+        yield _sse("[DONE]")
+    except Exception as e:
+        log.error("❌ Stream error: %s", e, exc_info=True)
+        yield _sse(json.dumps({"error": {"message": f"Proxy error: {e}", "code": "500"}}))
+        yield _sse("[DONE]")
+    finally:
+        await resp.aclose()
 
 
 # ─── HTTP 端点 ─────────────────────────────────────────────────
@@ -330,31 +472,33 @@ async def chat_completions(request: Request):
     client = await state.get_client()
 
     if is_stream:
+        try:
+            resp, byte_iter, first = await _open_upstream_stream(client, upstream, headers, body)
+        except UpstreamError as e:
+            log.warning("🚫 [%s] Stream upstream failed: %d %s", endpoint.name, e.status_code, str(e.payload)[:200])
+            return JSONResponse(status_code=e.status_code, content=e.payload)
         return StreamingResponse(
-            _stream_proxy(client, upstream, headers, body, config.cache_max_size),
+            _forward_stream(resp, byte_iter, first, config.cache_max_size),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
         )
 
     last_error = None
-    for attempt in range(3):
+    for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
             resp = await client.post(upstream, headers=headers, json=body)
             if resp.status_code != 200:
                 error_text = resp.text
-                log.warning("⚠️ [%s] Upstream %d (attempt %d): %s",
-                            endpoint.name, resp.status_code, attempt + 1, error_text[:200])
-                if resp.status_code < 500:
-                    return JSONResponse(
-                        {"error": {"message": f"Upstream error: {error_text[:200]}", "code": str(resp.status_code)}},
-                        status_code=resp.status_code,
-                    )
-                last_error = error_text
-                if attempt < 2:
-                    await asyncio.sleep(1 * (attempt + 1))
+                log.warning("⚠️ [%s] Upstream %d (attempt %d/%d): %s",
+                            endpoint.name, resp.status_code, attempt + 1, RETRY_MAX_ATTEMPTS, error_text[:200])
+                verdict = _classify_upstream_failure(resp.status_code, error_text)
+                if verdict == "retry" and attempt < RETRY_MAX_ATTEMPTS - 1:
+                    await _retry_sleep(attempt)
                     continue
+                if verdict == "fatal":
+                    return JSONResponse(content=_error_payload(resp.status_code, error_text), status_code=resp.status_code)
                 return JSONResponse(
-                    {"error": {"message": f"MiMo API error after 3 attempts: {last_error[:200]}", "code": "502"}},
+                    {"error": {"message": f"Upstream error after {RETRY_MAX_ATTEMPTS} attempts: {error_text[:200]}", "code": "502"}},
                     status_code=502,
                 )
 
@@ -378,10 +522,10 @@ async def chat_completions(request: Request):
             return JSONResponse(content=data, status_code=200)
 
         except httpx.TimeoutException as e:
-            log.warning("⚠️ [%s] Timeout (attempt %d): %s", endpoint.name, attempt + 1, e)
+            log.warning("⚠️ [%s] Timeout (attempt %d/%d): %s", endpoint.name, attempt + 1, RETRY_MAX_ATTEMPTS, e)
             last_error = str(e)
-            if attempt < 2:
-                await asyncio.sleep(2 * (attempt + 1))
+            if attempt < RETRY_MAX_ATTEMPTS - 1:
+                await _retry_sleep(attempt)
                 continue
         except Exception as e:
             log.error("❌ [%s] Error: %s", endpoint.name, e, exc_info=True)
