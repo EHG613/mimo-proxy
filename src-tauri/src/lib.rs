@@ -125,6 +125,17 @@ fn update_tray(app: &AppHandle) {
     };
 }
 
+// macOS：打开配置窗口时切回常规模式（Dock 图标出现）；窗口关闭时切到 Accessory 隐藏 Dock
+fn show_config_window(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    if let Some(window) = app.get_webview_window("config") {
+        let _ = window.unminimize();
+        window.show().ok();
+        window.set_focus().ok();
+    }
+}
+
 // ─── IPC 命令 ───
 
 #[tauri::command]
@@ -328,10 +339,7 @@ pub fn run() {
                                 });
                             }
                             "config" => {
-                                if let Some(window) = app.get_webview_window("config") {
-                                    window.show().ok();
-                                    window.set_focus().ok();
-                                }
+                                show_config_window(app);
                             }
                             "quit" => {
                                 let app_handle = app.clone();
@@ -350,10 +358,7 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        if let Some(window) = tray.app_handle().get_webview_window("config") {
-                            window.show().ok();
-                            window.set_focus().ok();
-                        }
+                        show_config_window(tray.app_handle());
                     }
                 })
                 .build(app)?;
@@ -385,6 +390,11 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "config" {
                     window.hide().ok();
+                    // macOS：窗口关闭后切到 Accessory 模式，Dock 图标隐藏，仅保留菜单栏托盘
+                    #[cfg(target_os = "macos")]
+                    let _ = window
+                        .app_handle()
+                        .set_activation_policy(tauri::ActivationPolicy::Accessory);
                     api.prevent_close();
                 }
             }
@@ -396,11 +406,7 @@ pub fn run() {
                 // macOS：点击程序坞图标（或 Finder 重新打开）时，显示并聚焦配置窗口。
                 // 窗口平时是 hide() 隐藏的，不处理 Reopen 就会表现为"点了没反应"
                 tauri::RunEvent::Reopen { .. } => {
-                    if let Some(window) = app.get_webview_window("config") {
-                        let _ = window.unminimize();
-                        window.show().ok();
-                        window.set_focus().ok();
-                    }
+                    show_config_window(app);
                 }
                 tauri::RunEvent::Exit => {
                     // 退出时清理 Python sidecar（锁外 kill，避免持锁阻塞）
