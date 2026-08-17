@@ -1,13 +1,13 @@
 {
   "name": "mimo-proxy",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
     "build:sidecar": "bash scripts/build-sidecar.sh",
     "build:dmg": "bash scripts/build-dmg.sh",
-    "build": "npm run build:sidecar && tauri build"
+    "build": "npm run build:sidecar && tauri build && npm run build:dmg"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
