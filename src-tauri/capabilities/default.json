@@ -3,6 +3,11 @@
   "description": "Default capability for the main window",
   "windows": ["config"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:window:allow-hide",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging"
   ]
 }

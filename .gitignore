@@ -27,3 +27,6 @@ src-tauri/resources/
 
 # Logs
 *.log
+
+.figma/
+.trae/

@@ -1,144 +1,387 @@
+/* ═══════════════════════════════════════════════════════════════
+   MiMo Proxy — Figma 暗色玻璃态（Dark Glassmorphism）
+   设计稿参考：.figma/5_149/
+   ═══════════════════════════════════════════════════════════════ */
+
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
+/* ─── 设计 Token ─── */
 :root {
-  --bg: #ffffff;
-  --bg-alt: #f5f5f5;
-  --border: #d1d1d1;
-  --text: #1d1d1f;
-  --text-secondary: #6e6e73;
-  --accent: #007aff;
-  --danger: #ff3b30;
-  --green: #34c759;
-  --radius: 6px;
+  --font: Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", SimHei, Arial, Helvetica, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* 文字 */
+  --text-primary: #ffffff;
+  --text-secondary: #ffffffb2;
+  --text-tertiary: #ffffff99;
+  --text-muted: #ffffff66;
+  --text-hint: #ffffff59;
+  --text-dim: #ffffff80;
+
+  /* 玻璃面板 */
+  --glass-bg: #ffffff0d;
+  --glass-bg-strong: #ffffff14;
+  --glass-bg-row: #00000014;
+  --glass-border: #ffffff14;
+  --glass-border-strong: #ffffff1a;
+  --glass-border-light: #ffffff0f;
+  --glass-border-input: #ffffff26;
+  --glass-shadow: inset 0px 1px 0px 0px #ffffff1f;
+
+  /* 强调色 */
+  --accent-border: #8cc8ff66;
+  --accent-glow: #3c78ff40;
+  --accent-inner-glow: #ffffff33;
+  --accent-gradient: linear-gradient(105.45deg, #64b4ff73 0%, #4e93ff80 50%, #3c78ff8c 100%);
+  --accent-gradient-btn: linear-gradient(111.19deg, #64b4ff73 0%, #4e93ff80 50%, #3c78ff8c 100%);
+
+  /* 复选框 */
+  --checkbox-checked-bg: linear-gradient(135deg, #78c8ff99 0%, #66adff8c 50%, #508cff80 100%);
+  --checkbox-checked-border: #96d2ff99;
+  --checkbox-checked-shadow: inset 0px 1px 0px 0px #ffffff4d, 0px 2px 8px 0px #64a0ff66;
+  --checkbox-unchecked-bg: #ffffff0f;
+  --checkbox-unchecked-border: #ffffff2e;
+
+  /* 圆角 */
+  --radius-pill: 16777200px;
+  --radius-lg: 16px;
+  --radius-md: 20px;
+  --radius-btn: 16px;
+}
+
+html, body {
+  height: 100%;
+}
+
+html {
+  background-color: #293e70;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  position: relative;
+  font-family: var(--font);
   font-size: 13px;
-  color: var(--text);
-  background: var(--bg);
+  color: var(--text-primary);
+  background-color: #293e70;
+  background-image: linear-gradient(90deg, #293e70 0%, #2e4076 23%, #224d69 50%, #105055 76%, #0f484d 100%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  background-size: cover;
   overflow: hidden;
   user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, #442b7e 0%, #443484 24%, #3a4284 50%, #235e84 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.38) 42%, #000 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.38) 42%, #000 100%);
 }
 
 #app {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   height: 100vh;
-  padding: 14px 16px;
-  gap: 10px;
 }
 
-/* ─── 顶部栏 ─── */
-#top-bar {
+/* ═══════════════════════════════════════════════════════════════
+   端口控制行
+   ═══════════════════════════════════════════════════════════════ */
+
+#port-row {
   display: flex;
   align-items: center;
-  gap: 10px;
   flex-shrink: 0;
+  border-bottom: 1px solid var(--glass-border);
+  background: var(--glass-bg-row);
+  padding: 12px 20px;
 }
 
-.field-group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.field-group label {
-  font-weight: 600;
+#port-row label {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--text-tertiary);
   white-space: nowrap;
 }
 
-.field-group input {
-  width: 80px;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-size: 13px;
-  font-family: inherit;
-  outline: none;
+/* 端口步进器 */
+#port-stepper {
+  display: flex;
+  align-items: center;
+  margin-left: 12px;
+  border: 1px solid var(--glass-border-input);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0px 1px 3px 0px #00000033;
+  background: var(--glass-bg-strong);
+  overflow: hidden;
 }
 
-.field-group input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.15);
+#port-stepper #port {
+  width: 80px;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 20px;
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-appearance: textfield;
+}
+
+#port-stepper #port::-webkit-inner-spin-button,
+#port-stepper #port::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+#stepper-btns {
+  display: inline-flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  border-left: 1px solid var(--glass-border-strong);
+}
+
+.stepper-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  line-height: 0;
+  transition: color 0.15s ease;
+}
+
+.stepper-btn:hover {
+  color: var(--text-primary);
+}
+
+#port-down {
+  border-top: 1px solid var(--glass-border-strong);
+  padding: 1px 6px 2px;
+}
+
+/* 状态胶囊 */
+#status-wrap {
+  display: flex;
+  margin-left: 12px;
 }
 
 #status {
-  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  column-gap: 6px;
+  border: 1px solid #ffffff1f;
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0px 1px 0px 0px #ffffff14;
+  background: #ffffff12;
+  padding: 5px 13px;
   font-size: 12px;
   font-weight: 500;
-  padding: 4px 0;
+  line-height: 16px;
+  white-space: nowrap;
 }
 
-#status.stopped { color: var(--text-secondary); }
-#status.running { color: var(--green); }
+#status.stopped {
+  color: var(--text-dim);
+}
 
-/* ─── 按钮 ─── */
+#status.running {
+  color: #32d74b;
+  animation: pulse 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(50, 215, 75, 0.4); }
+  70%  { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* 启动/停止按钮 */
+#toggle-btn {
+  margin-left: auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   按钮通用样式
+   ═══════════════════════════════════════════════════════════════ */
+
 .btn {
-  padding: 5px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 19px;
+  border: none;
+  border-radius: var(--radius-btn);
   font-family: inherit;
+  font-size: 14px;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.15s;
+  transition: filter 0.15s ease, opacity 0.15s ease;
 }
 
-.btn:hover {
-  background: var(--bg-alt);
+.btn:active {
+  filter: brightness(0.9);
 }
 
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 主按钮（启动/停止、保存并应用）：渐变蓝色 */
 .btn.primary {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
+  border: 1px solid var(--accent-border);
+  background-image: var(--accent-gradient-btn);
+  box-shadow: inset 0px 1px 0px 0px #ffffff40, 0px 4px 16px 0px #3c78ff4d;
+  color: #ffffff;
+  font-weight: 600;
+  line-height: 20px;
 }
 
 .btn.primary:hover {
-  background: #0066d6;
+  filter: brightness(1.08);
 }
 
+/* 强调按钮（添加 baseURL）：描边 + 半透明 */
 .btn.accent {
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 600;
+  border: 1px solid #78b4ff4d;
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0px 1px 0px 0px #ffffff1a, 0px 2px 8px 0px #6496ff1a;
+  background: #78b4ff1a;
+  padding: 5px 15px;
+  height: 34px;
+  color: #a0d2ffe5;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
 }
 
 .btn.accent:hover {
-  background: rgba(0, 122, 255, 0.08);
+  filter: brightness(1.1);
 }
 
-/* ─── 标题区 ─── */
+/* 图标按钮：用 CSS mask 实现矢量图标 */
+.btn.icon-btn::before {
+  content: "";
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  background-color: currentColor;
+  -webkit-mask-size: contain;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-size: contain;
+  mask-position: center;
+  mask-repeat: no-repeat;
+}
+
+/* 重载配置按钮图标 */
+#reload-btn.icon-btn::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='23 4 23 10 17 10'/%3E%3Cpath d='M20.49 15a9 9 0 1 1-2.12-9.36L23 10'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='23 4 23 10 17 10'/%3E%3Cpath d='M20.49 15a9 9 0 1 1-2.12-9.36L23 10'/%3E%3C/svg%3E");
+}
+
+/* 保存并应用按钮图标 */
+#save-btn.icon-btn::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpolyline points='7 10 12 15 17 10'/%3E%3Cline x1='12' y1='15' x2='12' y2='3'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpolyline points='7 10 12 15 17 10'/%3E%3Cline x1='12' y1='15' x2='12' y2='3'/%3E%3C/svg%3E");
+}
+
+/* 添加 baseURL 按钮图标 */
+#add-btn.icon-btn::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round'%3E%3Cline x1='12' y1='5' x2='12' y2='19'/%3E%3Cline x1='5' y1='12' x2='19' y2='12'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round'%3E%3Cline x1='12' y1='5' x2='12' y2='19'/%3E%3Cline x1='5' y1='12' x2='19' y2='12'/%3E%3C/svg%3E");
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BaseURL 管理卡片
+   ═══════════════════════════════════════════════════════════════ */
+
+.card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 16px;
+  border: 1px solid var(--glass-border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-shadow);
+  background: var(--glass-bg);
+  overflow: hidden;
+}
+
+/* 卡片头部 */
 #section-header {
+  padding: 16px 20px 12px;
   flex-shrink: 0;
 }
 
 #section-header h2 {
-  font-size: 15px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+  letter-spacing: -0.4px;
+  color: var(--text-primary);
 }
 
 #section-header .hint {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-top: 2px;
+  padding-top: 4px;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--text-muted);
 }
 
-/* ─── 表格 ─── */
+/* 表格滚动区 */
 #table-wrapper {
   flex: 1;
   overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
   min-height: 120px;
 }
 
+#table-wrapper::-webkit-scrollbar {
+  width: 8px;
+}
+
+#table-wrapper::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#table-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+#table-wrapper::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* 表格 */
 #endpoint-table {
   width: 100%;
   border-collapse: collapse;
@@ -148,125 +391,279 @@ body {
 #endpoint-table thead {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
+}
+
+#endpoint-table thead tr {
+  border-top: 1px solid #ffffff12;
+  background: #0000001a;
 }
 
 #endpoint-table th {
-  background: var(--bg-alt);
+  padding: 8px 20px;
+  height: 34px;
+  font-size: 11px;
   font-weight: 600;
-  font-size: 12px;
+  line-height: 17px;
+  letter-spacing: 1.1px;
+  color: var(--text-hint);
+  text-transform: uppercase;
   text-align: left;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
-}
-
-#endpoint-table td {
-  padding: 0;
-  border-bottom: 1px solid #eee;
-}
-
-#endpoint-table tbody tr:last-child td {
   border-bottom: none;
 }
 
-#endpoint-table tbody tr:hover td {
-  background: rgba(0, 122, 255, 0.03);
+/* 列宽 */
+.col-name { width: 150px; }
+.col-url  { width: auto; }
+.col-default { width: 56px; text-align: center; }
+.col-enabled { width: 56px; text-align: center; }
+.col-copy   { width: 56px; text-align: center; }
+.col-delete { width: 56px; text-align: center; }
+
+/* 窄列减少水平内边距，为复选框/操作按钮留出足够空间 */
+#endpoint-table th.col-default,
+#endpoint-table th.col-enabled,
+#endpoint-table th.col-copy,
+#endpoint-table th.col-delete,
+#endpoint-table td.col-default,
+#endpoint-table td.col-enabled,
+#endpoint-table td.col-copy,
+#endpoint-table td.col-delete {
+  padding-left: 8px;
+  padding-right: 8px;
+  text-align: center;
 }
 
-.col-name   { width: 110px; }
-.col-url    { width: auto; }
-.col-default { width: 52px; text-align: center; }
-.col-enabled { width: 52px; text-align: center; }
-.col-copy    { width: 52px; text-align: center; }
-.col-delete  { width: 52px; text-align: center; }
+/* 表格行 */
+#endpoint-table tbody tr {
+  border-top: 1px solid var(--glass-border-light);
+  height: 49px;
+}
+
+#endpoint-table tbody tr:nth-child(even) {
+  background: #ffffff05;
+}
+
+#endpoint-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+#endpoint-table td {
+  padding: 10px 20px;
+  border-bottom: none;
+}
 
 /* 表格内输入框 */
 #endpoint-table td input[type="text"],
 #endpoint-table td input[type="url"] {
   width: 100%;
-  padding: 6px 10px;
-  border: 1px solid transparent;
-  border-radius: 0;
-  font-size: 13px;
-  font-family: monospace;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
   background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 20px;
   outline: none;
-  transition: border-color 0.15s, background 0.15s;
+  user-select: text;
+  -webkit-user-select: text;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.col-name input[type="text"] {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+#endpoint-table td input[type="text"]:hover,
+#endpoint-table td input[type="url"]:hover {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 #endpoint-table td input[type="text"]:focus,
 #endpoint-table td input[type="url"]:focus {
-  border-color: var(--accent);
-  background: rgba(0, 122, 255, 0.04);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
 }
 
-.col-name input {
-  font-family: inherit !important;
-}
+/* ─── 表格内自定义复选框（圆形玻璃态） ─── */
 
-/* 表格内复选框 */
 #endpoint-table td input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
-  accent-color: var(--accent);
+  vertical-align: middle;
+  margin: 0;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-/* 表格内删除按钮 */
+/* 未选中态 */
+#endpoint-table td input[type="checkbox"]:not(:checked) {
+  border: 1px solid var(--checkbox-unchecked-border);
+  background: var(--checkbox-unchecked-bg);
+}
+
+#endpoint-table td input[type="checkbox"]:not(:checked):hover {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* 选中态 */
+#endpoint-table td input[type="checkbox"]:checked {
+  border: 1px solid var(--checkbox-checked-border);
+  background-image: var(--checkbox-checked-bg);
+  box-shadow: var(--checkbox-checked-shadow);
+  position: relative;
+}
+
+#endpoint-table td input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-color: white;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+  -webkit-mask-size: 11px 11px;
+  mask-size: 11px 11px;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+/* ─── 表格内操作按钮（复制/删除） ─── */
+
+#endpoint-table td .copy-btn,
 #endpoint-table td .del-btn {
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--glass-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--glass-bg);
+  color: var(--text-dim);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  font-size: 0;
+  line-height: 0;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+#endpoint-table td .copy-btn::before,
+#endpoint-table td .del-btn::before {
+  content: "";
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  background-color: currentColor;
+  -webkit-mask-size: contain;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-size: contain;
+  mask-position: center;
+  mask-repeat: no-repeat;
+}
+
+#endpoint-table td .copy-btn::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2' ry='2'/%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2' ry='2'/%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'/%3E%3C/svg%3E");
+}
+
+#endpoint-table td .del-btn::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='3 6 5 6 21 6'/%3E%3Cpath d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='3 6 5 6 21 6'/%3E%3Cpath d='M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'/%3E%3C/svg%3E");
+}
+
+#endpoint-table td .copy-btn:hover,
+#endpoint-table td .del-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-secondary);
+  border-color: rgba(255, 255, 255, 0.25);
 }
 
 #endpoint-table td .del-btn:hover {
-  background: rgba(255, 59, 48, 0.1);
-  color: var(--danger);
+  color: #ff453a;
+  background: rgba(255, 69, 58, 0.15);
+  border-color: rgba(255, 69, 58, 0.3);
 }
 
-/* 表格内复制按钮 */
-#endpoint-table td .copy-btn {
-  width: 28px;
-  height: 24px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 14px;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-
-#endpoint-table td .copy-btn:hover {
-  background: rgba(0, 122, 255, 0.1);
-  color: var(--accent);
-}
-
+/* 复制成功态 */
 #endpoint-table td .copy-btn.copied {
-  color: var(--green);
+  color: #32d74b;
 }
 
-/* 表格内对齐 */
-.col-default, .col-enabled, .col-copy, .col-delete {
+#endpoint-table td .copy-btn.copied::before {
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+}
+
+/* 单元格对齐 */
+.col-default,
+.col-enabled,
+.col-copy,
+.col-delete {
   vertical-align: middle;
 }
 
-/* ─── 底部栏 ─── */
-#bottom-bar {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+/* 卡片底部：添加按钮 */
+.card-footer {
+  padding: 15px 20px 16px;
+  border-top: 1px solid #ffffff12;
   flex-shrink: 0;
 }
 
-/* ─── 添加按钮 ─── */
-#add-btn {
+/* ═══════════════════════════════════════════════════════════════
+   底部操作栏
+   ═══════════════════════════════════════════════════════════════ */
+
+#bottom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  column-gap: 10px;
   flex-shrink: 0;
-  align-self: flex-start;
+  border-top: 1px solid var(--glass-border);
+  background: #0000000f;
+  padding: 11px 20px 12px;
+}
+
+/* 重载配置按钮 */
+#reload-btn {
+  border: 1px solid #ffffff1f;
+  border-radius: var(--radius-btn);
+  box-shadow: inset 0px 1px 0px 0px #ffffff1a;
+  background: #ffffff0f;
+  padding: 5px 15px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+#reload-btn:hover {
+  background: #ffffff18;
+  color: var(--text-secondary);
+}
+
+/* 保存并应用按钮 */
+#save-btn {
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-btn);
+  box-shadow: inset 0px 1px 0px 0px var(--accent-inner-glow), 0px 4px 12px 0px var(--accent-glow);
+  background-image: var(--accent-gradient);
+  padding: 5px 15px;
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+#save-btn:hover {
+  filter: brightness(1.08);
 }

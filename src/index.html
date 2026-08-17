@@ -3,51 +3,67 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
   <title>MiMo Proxy 配置</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="app">
-    <!-- 顶部栏 -->
-    <div id="top-bar">
-      <div class="field-group">
-        <label for="port">监听端口</label>
+
+    <!-- 端口控制行 -->
+    <div id="port-row">
+      <label for="port">监听端口</label>
+      <div id="port-stepper">
         <input type="number" id="port" min="1" max="65535" value="8899">
+        <div id="stepper-btns">
+          <button id="port-up" class="stepper-btn" aria-label="增加端口" tabindex="-1">
+            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 1L9 9H1z" fill="currentColor"/></svg>
+          </button>
+          <button id="port-down" class="stepper-btn" aria-label="减少端口" tabindex="-1">
+            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1L9 1L5 9z" fill="currentColor"/></svg>
+          </button>
+        </div>
       </div>
-      <div id="status" class="stopped">● 已停止</div>
+      <div id="status-wrap">
+        <div id="status" class="stopped">已停止</div>
+      </div>
       <button id="toggle-btn" class="btn primary">启动代理</button>
     </div>
 
-    <!-- 标题 -->
-    <div id="section-header">
-      <h2>BaseURL 列表</h2>
-      <p class="hint">每个 baseURL 会以 /{名称}/v1/chat/completions 路径暴露。双击表格中的 Name 或 BaseURL 单元格即可编辑。</p>
-    </div>
+    <!-- BaseURL 管理卡片 -->
+    <div class="card">
+      <div id="section-header">
+        <h2>BaseURL 列表</h2>
+        <p class="hint">每个 baseURL 会以 /{名称}/v1/chat/completions 路径暴露。点击单元格即可直接编辑名称与地址。</p>
+      </div>
 
-    <!-- 表格 -->
-    <div id="table-wrapper">
-      <table id="endpoint-table">
-        <thead>
-          <tr>
-            <th class="col-name">名称</th>
-            <th class="col-url">BaseURL</th>
-            <th class="col-default">默认</th>
-            <th class="col-enabled">启用</th>
-            <th class="col-copy">复制</th>
-            <th class="col-delete">删除</th>
-          </tr>
-        </thead>
-        <tbody id="endpoint-tbody"></tbody>
-      </table>
-    </div>
+      <!-- 表格 -->
+      <div id="table-wrapper">
+        <table id="endpoint-table">
+          <thead>
+            <tr>
+              <th class="col-name">名称</th>
+              <th class="col-url">BaseURL</th>
+              <th class="col-default">默认</th>
+              <th class="col-enabled">启用</th>
+              <th class="col-copy">复制</th>
+              <th class="col-delete">删除</th>
+            </tr>
+          </thead>
+          <tbody id="endpoint-tbody"></tbody>
+        </table>
+      </div>
 
-    <!-- 添加按钮 -->
-    <button id="add-btn" class="btn accent">＋ 添加 baseURL</button>
+      <!-- 添加按钮 -->
+      <div class="card-footer">
+        <button id="add-btn" class="btn accent icon-btn">添加 baseURL</button>
+      </div>
+    </div>
 
     <!-- 底部操作栏 -->
     <div id="bottom-bar">
-      <button id="reload-btn" class="btn">↻ 重载配置</button>
-      <button id="save-btn" class="btn primary">💾 保存并应用</button>
+      <button id="reload-btn" class="btn icon-btn">重载配置</button>
+      <button id="save-btn" class="btn primary icon-btn">保存并应用</button>
     </div>
   </div>
 
