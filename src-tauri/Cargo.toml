@@ -1,6 +1,6 @@
 [package]
 name = "mimo-proxy"
-version = "2.0.0"
+version = "2.1.1"
 description = "MiMo Reasoning Content Proxy - macOS Client"
 authors = []
 edition = "2021"

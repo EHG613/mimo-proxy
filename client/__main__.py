@@ -126,7 +126,7 @@ def main() -> int:
         return 1
 
     app = create_app(cfg)
-    print(f"MiMo Proxy v2.0 on {cfg.host}:{cfg.port}")
+    print(f"MiMo Proxy v2.1.1 on {cfg.host}:{cfg.port}")
     print(f"  默认 endpoint: {cfg.default_name} → {cfg.default_endpoint().base_url if cfg.default_endpoint() else '-'}")
     for ep in cfg.endpoints:
         marker = "✓" if ep.name == cfg.default_name else " "

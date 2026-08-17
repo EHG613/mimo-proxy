@@ -601,7 +601,7 @@ async def root(request: Request):
     config = _state.config
     return JSONResponse({
         "status": "running",
-        "service": "MiMo Reasoning Content Proxy v2.0",
+        "service": "MiMo Reasoning Content Proxy v2.1.1",
         "host": config.host,
         "port": config.port,
         "default_name": config.default_name,

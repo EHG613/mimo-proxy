@@ -4,7 +4,7 @@
 
 A lightweight proxy that solves the MiMo API's `reasoning_content` requirement that causes **400 Param Incorrect** errors in Trae, Cursor, and other clients.
 
-v2.0 introduces a **macOS desktop client** (menu bar app + config window) built with Tauri 2, supporting multiple baseURLs with path-based routing.
+Current version: **v2.1**. v2.0 introduced a **macOS desktop client** (menu bar app + config window) built with Tauri 2, supporting multiple baseURLs with path-based routing.
 
 ## Project Structure
 
@@ -141,7 +141,13 @@ All endpoints share the same port, differentiated by URL path prefix:
 | Request Path | Routes To |
 |-------------|-----------|
 | `/{name}/v1/chat/completions` | Named endpoint's baseURL |
+| `/{name}/chat/completions` | Named endpoint's baseURL (no `/v1` prefix, compatibility) |
+| `/{name}/v1/models` | Named endpoint's `/models` |
+| `/{name}/models` | Named endpoint's `/models` (compatibility) |
 | `/v1/chat/completions` | **Default** endpoint (backward compatible) |
+| `/chat/completions` | **Default** endpoint (compatibility) |
+| `/v1/models` | **Default** endpoint's `/models` |
+| `/models` | **Default** endpoint's `/models` (compatibility) |
 | `/` | Status page, lists all endpoints |
 | `/health` | Health check |
 
@@ -154,6 +160,23 @@ All endpoints share the same port, differentiated by URL path prefix:
 http://127.0.0.1:8899/v1/chat/completions              # Default endpoint
 http://127.0.0.1:8899/{name}/v1/chat/completions       # Named endpoint
 ```
+
+## Error Messages
+
+Network failures are classified and returned to the client with human-readable Chinese `message` text (HTTP 502):
+
+| Underlying error | Message shown to the client |
+|---|---|
+| Connect timeout | 连接上游服务器超时（超过30s）：服务器无响应、网络不通或端口不可达 |
+| Read timeout | 等待上游响应超时（超过300s）：上游处理过慢或已无响应 |
+| Pool timeout | 上游连接池已满，排队等待连接超时（超过300s）：并发请求过多 |
+| Upstream closed connection | 上游在返回响应前断开了连接：网关重启、过载或中间链路被中断 |
+| DNS resolution failure | 无法解析上游域名（DNS 解析失败） |
+| Connection refused | 上游连接被拒绝：服务未启动或端口未监听 |
+| TLS/SSL handshake failure | 与上游 TLS/SSL 握手失败或证书校验不通过 |
+| Mid-stream disconnect | 上游流中途中断：上游进程崩溃或网络断开 |
+
+Requests are retried up to 3 times with exponential backoff (~1s / ~2s) before failing. Once a stream has started sending data to the client it is finished with a clean error frame instead of being retried, to avoid duplicated content.
 
 ## Systemd Deployment (Linux Server)
 
@@ -208,16 +231,6 @@ journalctl -u mimo-proxy -f
 - Degraded mode (stripping tool_calls) causes the model to lose tool call context
 - Only supports OpenAI-compatible `/v1/chat/completions` endpoint
 - GUI client is macOS only (built on Tauri 2)
-
-## 邀请码
-我在用 MiMo 开放平台体验 小米顶尖模型 MiMo V2.5等 ，通过我的邀请码注册为新用户，即得 ¥10 API 体验金。邀请码：B8DMC5。注册：https://platform.xiaomimimo.com?ref=B8DMC5（注册后点控制台左下方入口填入，体验金40天有效）
-
-
-## 相关链接
-
-- [小米 MiMo API 官方公告](https://platform.xiaomimimo.com/docs/zh-CN/usage-guide/passing-back-reasoning_content)
-- [LINUX DO 讨论帖](https://linux.do/t/topic/2165444)
-- [Trae 论坛反馈](https://forum.trae.cn/t/topic/17335)
 
 ## License
 
