@@ -20,6 +20,8 @@ import json
 import logging
 import random
 import re
+import socket
+import ssl
 import time
 from collections import OrderedDict
 from contextlib import asynccontextmanager
@@ -60,6 +62,32 @@ def _classify_upstream_failure(status: int, body_text: str) -> str:
     if status >= 500:
         return "retry"
     return "fatal"
+
+
+def _describe_error(e: Exception) -> str:
+    """把底层网络异常映射为用户可读的中文说明，便于快速定位失败/中断原因。"""
+    if isinstance(e, httpx.ConnectTimeout):
+        return "连接上游服务器超时（超过30s）：服务器无响应、网络不通或端口不可达"
+    if isinstance(e, httpx.PoolTimeout):
+        return "上游连接池已满，排队等待连接超时（超过300s）：并发请求过多"
+    if isinstance(e, httpx.ReadTimeout):
+        return "等待上游响应超时（超过300s）：上游处理过慢或已无响应"
+    if isinstance(e, httpx.WriteTimeout):
+        return "向上游发送请求超时（超过300s）"
+    if isinstance(e, httpx.RemoteProtocolError):
+        return f"上游在返回响应前断开了连接：网关重启、过载或中间链路被中断（{e}）"
+    if isinstance(e, httpx.ConnectError):
+        cause = e.__cause__
+        if isinstance(cause, socket.gaierror):
+            return f"无法解析上游域名（DNS 解析失败：{cause}）"
+        if isinstance(cause, ConnectionRefusedError):
+            return "上游连接被拒绝：服务未启动或端口未监听"
+        if isinstance(cause, ssl.SSLError):
+            return f"与上游 TLS/SSL 握手失败或证书校验不通过（{cause}）"
+        return f"连接上游失败（{cause or e}）"
+    if isinstance(e, httpx.ReadError):
+        return f"读取上游响应中断：上游进程崩溃或网络断开（{e}）"
+    return f"{type(e).__name__}: {e}"
 
 
 class UpstreamError(Exception):
@@ -308,16 +336,19 @@ async def _open_upstream_stream(
 
         except UpstreamError:
             raise
-        except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as e:
+        except httpx.RequestError as e:
             log.warning("⚠️ Stream network error (attempt %d/%d): %s", attempt + 1, RETRY_MAX_ATTEMPTS, e)
             if resp is not None:
                 await resp.aclose()
             if attempt < RETRY_MAX_ATTEMPTS - 1:
                 await _retry_sleep(attempt)
                 continue
-            raise UpstreamError(502, {"error": {"message": f"network error after retries: {e}", "code": "502"}})
+            raise UpstreamError(
+                502,
+                {"error": {"message": f"连接上游失败（已重试{RETRY_MAX_ATTEMPTS}次）：{_describe_error(e)}", "code": "502"}},
+            )
 
-    raise UpstreamError(502, {"error": {"message": "upstream unavailable", "code": "502"}})
+    raise UpstreamError(502, {"error": {"message": "上游不可用", "code": "502"}})
 
 
 async def _forward_stream(resp: httpx.Response, byte_iter: AsyncIterator[bytes], first: bytes, max_size: int):
@@ -399,14 +430,14 @@ async def _forward_stream(resp: httpx.Response, byte_iter: AsyncIterator[bytes],
                 else:
                     yield (line + "\n").encode("utf-8")
 
-    except (httpx.TimeoutException, httpx.RemoteProtocolError) as e:
+    except httpx.RequestError as e:
         # 已向客户端转发过数据 → 不能重试（会造成内容重复），干净收尾
         log.error("❌ Stream aborted mid-flight: %s", e)
-        yield _sse(json.dumps({"error": {"message": f"upstream stream aborted: {e}", "code": "502"}}))
+        yield _sse(json.dumps({"error": {"message": f"上游流中途中断：{_describe_error(e)}", "code": "502"}}))
         yield _sse("[DONE]")
     except Exception as e:
         log.error("❌ Stream error: %s", e, exc_info=True)
-        yield _sse(json.dumps({"error": {"message": f"Proxy error: {e}", "code": "500"}}))
+        yield _sse(json.dumps({"error": {"message": f"代理内部错误：{e}", "code": "500"}}))
         yield _sse("[DONE]")
     finally:
         await resp.aclose()
@@ -521,18 +552,19 @@ async def chat_completions(request: Request):
 
             return JSONResponse(content=data, status_code=200)
 
-        except httpx.TimeoutException as e:
-            log.warning("⚠️ [%s] Timeout (attempt %d/%d): %s", endpoint.name, attempt + 1, RETRY_MAX_ATTEMPTS, e)
-            last_error = str(e)
+        except httpx.RequestError as e:
+            log.warning("⚠️ [%s] Upstream network error (attempt %d/%d): %s",
+                        endpoint.name, attempt + 1, RETRY_MAX_ATTEMPTS, e)
+            last_error = _describe_error(e)
             if attempt < RETRY_MAX_ATTEMPTS - 1:
                 await _retry_sleep(attempt)
                 continue
         except Exception as e:
             log.error("❌ [%s] Error: %s", endpoint.name, e, exc_info=True)
-            return JSONResponse({"error": {"message": str(e), "code": "500"}}, status_code=500)
+            return JSONResponse({"error": {"message": f"代理内部错误：{e}", "code": "500"}}, status_code=500)
 
     return JSONResponse(
-        {"error": {"message": f"Proxy error after retries: {last_error}", "code": "502"}},
+        {"error": {"message": f"代理请求上游失败（已重试{RETRY_MAX_ATTEMPTS}次）：{last_error}", "code": "502"}},
         status_code=502,
     )
 
@@ -555,8 +587,14 @@ async def list_models(request: Request):
     try:
         resp = await client.get(f"{endpoint.base_url}/models", headers=headers)
         return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    except httpx.RequestError as e:
+        log.warning("⚠️ [%s] Models network error: %s", endpoint.name, e)
+        return JSONResponse(
+            {"error": {"message": f"获取模型列表失败：{_describe_error(e)}", "code": "502"}},
+            status_code=502,
+        )
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=502)
+        return JSONResponse({"error": f"获取模型列表失败：{e}"}, status_code=502)
 
 
 async def root(request: Request):
