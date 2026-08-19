@@ -14,6 +14,8 @@ pub struct Endpoint {
     pub name: String,
     pub base_url: String,
     pub enabled: bool,
+    #[serde(default)]
+    pub vendor: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +45,7 @@ impl Default for ProxyConfig {
                 name: "default".into(),
                 base_url: "https://one-api-test.liangyihui.net:8080/v1".into(),
                 enabled: true,
+                vendor: String::new(),
             }],
         }
     }

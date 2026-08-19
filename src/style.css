@@ -415,6 +415,7 @@ body::before {
 /* 列宽 */
 .col-name { width: 150px; }
 .col-url  { width: auto; }
+.col-vendor { width: 120px; }
 .col-default { width: 56px; text-align: center; }
 .col-enabled { width: 56px; text-align: center; }
 .col-copy   { width: 56px; text-align: center; }

@@ -47,6 +47,19 @@ function renderTable($tbody) {
     tdUrl.appendChild(inpUrl);
     tr.appendChild(tdUrl);
 
+    // 供应商（模型 id 前缀：客户端配「供应商/模型id」时转发前自动剥离）
+    const tdVendor = document.createElement("td");
+    tdVendor.className = "col-vendor";
+    const inpVendor = document.createElement("input");
+    inpVendor.type = "text";
+    inpVendor.placeholder = "如 lyh";
+    inpVendor.value = ep.vendor || "";
+    inpVendor.addEventListener("input", () => {
+      config.endpoints[i].vendor = inpVendor.value.trim();
+    });
+    tdVendor.appendChild(inpVendor);
+    tr.appendChild(tdVendor);
+
     // 默认
     const tdDef = document.createElement("td");
     tdDef.className = "col-default";
@@ -222,6 +235,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       name: name,
       base_url: "https://api.xiaomimimo.com/v1",
       enabled: true,
+      vendor: "",
     });
     renderTable($tbody);
     $tbody.parentElement.scrollTop = $tbody.parentElement.scrollHeight;
@@ -258,6 +272,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (!ep.base_url) { alert(`"${n}" 的 BaseURL 不能为空`); return; }
       if (!ep.base_url.startsWith("http://") && !ep.base_url.startsWith("https://")) {
         alert(`"${n}" 的 BaseURL 必须以 http:// 或 https:// 开头`);
+        return;
+      }
+      if (ep.vendor && ep.vendor.includes("/")) {
+        alert(`"${n}" 的供应商不能包含 "/"（与「供应商/模型id」分隔符冲突）`);
         return;
       }
     }

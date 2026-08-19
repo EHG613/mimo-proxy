@@ -147,8 +147,8 @@ npm run build          # 生产构建（先构建 sidecar，再生成 .app / .dm
   "cache_ttl": 7200,
   "default_name": "default",
   "endpoints": [
-    {"name": "default", "base_url": "https://one-api-test.liangyihui.net:8080/v1", "enabled": true},
-    {"name": "prod",    "base_url": "https://api.xiaomimimo.com/v1",                "enabled": true}
+    {"name": "default", "base_url": "https://one-api-test.liangyihui.net:8080/v1", "enabled": true, "vendor": "lyh"},
+    {"name": "prod",    "base_url": "https://api.xiaomimimo.com/v1",                "enabled": true, "vendor": ""}
   ]
 }
 ```
@@ -161,7 +161,7 @@ npm run build          # 生产构建（先构建 sidecar，再生成 .app / .dm
 | `cache_max_size` | `2000` | 最大缓存条目数 |
 | `cache_ttl` | `7200` | 缓存过期时间（秒） |
 | `default_name` | `default` | 默认 endpoint 的名称 |
-| `endpoints[]` | — | baseURL 列表，每个 endpoint 含 `name` / `base_url` / `enabled` |
+| `endpoints[]` | — | baseURL 列表，每个 endpoint 含 `name` / `base_url` / `enabled` / `vendor`（供应商前缀，用于「供应商/模型id」模型配置，可选，默认空） |
 
 ### 路径路由
 
@@ -212,6 +212,22 @@ http://127.0.0.1:8899/prod/v1/chat/completions         # 指定 endpoint
 
 3. API Key 填你的 MiMo API Key
 4. Thinking Mode 可以保持开启
+
+### 模型 ID 供应商前缀
+
+部分 AI 工具（如 Trae、Cursor）在自定义模型与内置模型 ID 相同时，会用自定义配置覆盖内置模型。为避免冲突，可为 endpoint 配置 `vendor`（供应商），并将工具中的模型 ID 配置为「供应商/模型id」：
+
+| 场景 | 配置方式 |
+|------|----------|
+| endpoint 配置 | 在配置窗口 Endpoints 表格的「供应商」列填写，如 `lyh` |
+| 工具中模型 ID | 配置为 `lyh/deepseek-v4-flash` |
+| 代理转发 | 请求命中该 endpoint 且 model 以 `lyh/` 开头时，剥离前缀，按真实模型 ID `deepseek-v4-flash` 请求上游 |
+
+注意事项：
+
+- `vendor` 为空（默认）时不剥离，模型 ID 原样转发，行为与之前完全一致
+- `vendor` 不允许包含 `/`（它是「供应商/模型id」的分隔符）
+- 前缀剥离只针对请求实际路由到的 endpoint 配置的 vendor
 
 ## 错误信息
 

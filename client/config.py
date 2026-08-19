@@ -13,12 +13,14 @@
         {
           "name": "default",
           "base_url": "https://one-api-test.liangyihui.net:8080/v1",
-          "enabled": true
+          "enabled": true,
+          "vendor": "lyh"
         },
         {
           "name": "prod",
           "base_url": "https://api.xiaomimimo.com/v1",
-          "enabled": false
+          "enabled": false,
+          "vendor": ""
         }
       ]
     }
@@ -69,9 +71,11 @@ class Endpoint:
     name: str
     base_url: str
     enabled: bool = True
+    vendor: str = ""
 
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
+        self.vendor = self.vendor.strip("/")
 
 
 @dataclass
@@ -95,6 +99,7 @@ class Config:
                 name=e.get("name", ""),
                 base_url=e.get("base_url", ""),
                 enabled=bool(e.get("enabled", True)),
+                vendor=e.get("vendor", ""),
             )
             for e in d.get("endpoints", [])
         ]

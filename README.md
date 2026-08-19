@@ -128,11 +128,27 @@ Example:
   "cache_ttl": 7200,
   "default_name": "default",
   "endpoints": [
-    {"name": "default", "base_url": "https://one-api-test.liangyihui.net:8080/v1", "enabled": true},
-    {"name": "prod",    "base_url": "https://api.xiaomimimo.com/v1",                "enabled": true}
+    {"name": "default", "base_url": "https://one-api-test.liangyihui.net:8080/v1", "enabled": true, "vendor": "lyh"},
+    {"name": "prod",    "base_url": "https://api.xiaomimimo.com/v1",                "enabled": true, "vendor": ""}
   ]
 }
 ```
+
+### Vendor Prefix for Model IDs
+
+Some AI tools (e.g. Trae, Cursor) let a custom model override a built-in one when both share the same model ID (such as `deepseek-v4-flash`). To avoid the conflict, set a `vendor` on the endpoint and configure the model ID as `vendor/model-id`:
+
+| What | How |
+|------|-----|
+| Endpoint config | Fill in the **vendor** column, e.g. `lyh` |
+| Model ID in the tool | Configure as `lyh/deepseek-v4-flash` |
+| Proxy behavior | When a request routes to that endpoint and `model` starts with `lyh/`, the prefix is stripped and the real model ID `deepseek-v4-flash` is sent upstream |
+
+Notes:
+
+- An empty `vendor` (default) means no stripping — model IDs are forwarded unchanged, identical to previous behavior
+- `vendor` must not contain `/` (it is the separator in `vendor/model-id`)
+- Prefix stripping only applies to the vendor configured on the endpoint the request is routed to
 
 ### Path Routing
 
