@@ -129,7 +129,8 @@ Example:
   "default_name": "default",
   "endpoints": [
     {"name": "default", "base_url": "https://one-api-test.liangyihui.net:8080/v1", "enabled": true, "vendor": "lyh"},
-    {"name": "prod",    "base_url": "https://api.xiaomimimo.com/v1",                "enabled": true, "vendor": ""}
+    {"name": "prod",    "base_url": "https://api.xiaomimimo.com/v1",                "enabled": true, "vendor": ""},
+    {"name": "agent",   "base_url": "", "enabled": true, "type": "agent", "provider": "codebuddy"}
   ]
 }
 ```
@@ -149,6 +150,31 @@ Notes:
 - An empty `vendor` (default) means no stripping — model IDs are forwarded unchanged, identical to previous behavior
 - `vendor` must not contain `/` (it is the separator in `vendor/model-id`)
 - Prefix stripping only applies to the vendor configured on the endpoint the request is routed to
+
+### Built-in Agent Endpoint (codebuddy-agent-sdk)
+
+In addition to forwarding HTTP upstreams, the proxy ships a built-in "Agent endpoint": set an endpoint's `type` to `agent` and it routes to the local CodeBuddy Agent SDK (Python package `codebuddy-agent-sdk`, the same source as npm `@tencent-ai/agent-sdk`) instead of an HTTP upstream, converting its output into OpenAI-compatible streaming responses.
+
+| What | How |
+|------|-----|
+| Endpoint config | Set `type` to `agent`, leave `base_url` empty, `provider` defaults to `codebuddy` |
+| Request URL | Same as other endpoints: `http://127.0.0.1:{port}/{name}/v1/chat/completions` |
+| Request format | Standard OpenAI `/chat/completions`, streaming (`stream: true`) returns SSE |
+
+```bash
+curl -N http://127.0.0.1:8899/agent/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v3.1","stream":true,"messages":[{"role":"user","content":"explain recursion"}]}'
+```
+
+Notes:
+
+- **Multi-turn context**: sessions are reused per `endpoint name + model` by default; pass an `X-Session-Id` header to pin a specific session (sessions are isolated from each other).
+- **Message mapping**: the last `user` message is sent as this turn's prompt; `system` messages are prepended on the first turn.
+- **Streaming**: Agent text increments are converted into OpenAI `choices[].delta.content` SSE frames, ending with `data: [DONE]`.
+- **Errors**: missing SDK / CLI not found / connection failure return HTTP 502 with a readable `message`.
+- **Dependencies**: requires `codebuddy-agent-sdk` (already in `requirements.txt`); in production bundles the CodeBuddy CLI must be available, set `CODEBUDDY_CLI_PATH` if needed.
+- **Extensibility**: additional vendors are added via the provider abstraction in `client/agent_providers.py` without touching routing.
 
 ### Path Routing
 

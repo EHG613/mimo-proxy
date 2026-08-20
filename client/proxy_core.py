@@ -33,6 +33,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Route
 
+from .agent_core import done_frame, extract_prompt, get_session_manager, new_chat_id
+from .agent_providers import AgentError
 from .config import Config, Endpoint
 
 log = logging.getLogger("mimo-proxy")
@@ -488,6 +490,11 @@ async def chat_completions(request: Request):
     except Exception:
         return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
 
+    # agent 类型 endpoint：走内置 Agent SDK，而非 HTTP 上游
+    if endpoint.is_agent:
+        api_key = _extract_api_key(request)
+        return await _handle_agent_chat(endpoint, body, api_key)
+
     messages = body.get("messages", [])
     injected, degraded = inject_reasoning(messages, config.cache_ttl, config.cache_max_size)
     if injected or degraded:
@@ -569,6 +576,89 @@ async def chat_completions(request: Request):
     )
 
 
+# ─── 内置 Agent endpoint（走 codebuddy-agent-sdk 等厂商 SDK） ───
+
+def _extract_api_key(request: Request) -> str | None:
+    """从 Authorization 头提取 Bearer key（标准 OpenAI 风格）。"""
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        key = auth[7:].strip()
+        return key or None
+    return None
+
+
+async def _agent_stream(manager, entry, endpoint_name: str, prompt: str, model: str | None, chat_id: str):
+    """把 Agent 会话的文本增量转成 OpenAI SSE 字节流，含 [DONE] 收尾。"""
+    try:
+        async for frame in manager.stream(entry, prompt, model, chat_id):
+            yield _sse(json.dumps(frame, ensure_ascii=False))
+        yield _sse(json.dumps(done_frame(chat_id, model or "agent"), ensure_ascii=False))
+        yield _sse("[DONE]")
+    except AgentError as e:
+        log.error("❌ [%s] Agent 流式执行失败: %s", endpoint_name, e.message)
+        yield _sse(json.dumps({"error": {"message": e.message, "code": "502"}}, ensure_ascii=False))
+        yield _sse("[DONE]")
+
+
+async def _handle_agent_chat(endpoint: Endpoint, body: dict, api_key: str | None):
+    """agent 类型 endpoint：走内置 Agent SDK，转成 OpenAI 兼容响应。
+
+    流式返回 SSE；非流式聚合为一次完整 JSON。仅支持文本内容。
+    api_key 来自客户端 Authorization 头，透传给厂商 SDK。
+    """
+    if not api_key:
+        return JSONResponse(
+            {"error": {"message": "缺少 API key：请在 Authorization 头携带 Bearer <key>", "code": "401"}},
+            status_code=401,
+        )
+
+    manager = get_session_manager()
+    messages = body.get("messages", [])
+    model = body.get("model")
+    is_stream = bool(body.get("stream", False))
+
+    prompt = extract_prompt(messages)
+    if not prompt:
+        return JSONResponse({"error": "消息中缺少可发送的 user 内容"}, status_code=400)
+
+    chat_id = new_chat_id()
+    try:
+        entry = await manager.acquire(endpoint, model, api_key)
+    except AgentError as e:
+        log.warning("🚫 [%s] Agent 会话创建失败: %s", endpoint.name, e.message)
+        return JSONResponse({"error": {"message": e.message, "code": "502"}}, status_code=502)
+
+    if is_stream:
+        return StreamingResponse(
+            _agent_stream(manager, entry, endpoint.name, prompt, model, chat_id),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+        )
+
+    # 非流式：聚合流式输出后一次性返回
+    try:
+        parts: list[str] = []
+        async for frame in manager.stream(entry, prompt, model, chat_id):
+            parts.append(frame["choices"][0]["delta"].get("content") or "")
+        text = "".join(parts)
+        return JSONResponse({
+            "id": chat_id,
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": model or "agent",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": text},
+                    "finish_reason": "stop",
+                }
+            ],
+        })
+    except AgentError as e:
+        log.error("❌ [%s] Agent 执行失败: %s", endpoint.name, e.message)
+        return JSONResponse({"error": {"message": e.message, "code": "502"}}, status_code=502)
+
+
 async def list_models(request: Request):
     state = _state
     config = state.config
@@ -628,6 +718,7 @@ async def lifespan(app):
     if client:
         await client.aclose()
         _state._client = None
+    await get_session_manager().close_all()
 
 
 def create_app(config: Config) -> Starlette:

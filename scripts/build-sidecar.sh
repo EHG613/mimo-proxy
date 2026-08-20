@@ -20,5 +20,6 @@ export PYINSTALLER_CONFIG_DIR="$PWD/build/pyinstaller-cache"
   --hidden-import uvicorn.protocols.http.auto \
   --hidden-import uvicorn.protocols.websockets.auto \
   --hidden-import uvicorn.lifespan.on \
+  --collect-all codebuddy_agent_sdk \
   sidecar_entry.py
 echo "sidecar → src-tauri/resources/sidecar/mimo-proxy-sidecar/"

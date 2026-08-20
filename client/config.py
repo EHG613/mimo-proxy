@@ -72,10 +72,20 @@ class Endpoint:
     base_url: str
     enabled: bool = True
     vendor: str = ""
+    # 类型：http（默认，转发 HTTP 上游）/ agent（内置 Agent SDK，base_url 留空）
+    type: str = "http"
+    # agent 类型下的 provider 名称，缺省 codebuddy；http 类型忽略
+    provider: str = "codebuddy"
 
     def __post_init__(self) -> None:
-        self.base_url = self.base_url.rstrip("/")
-        self.vendor = self.vendor.strip("/")
+        self.base_url = (self.base_url or "").rstrip("/")
+        self.vendor = (self.vendor or "").strip("/")
+        self.type = (self.type or "http").strip().lower()
+        self.provider = (self.provider or "codebuddy").strip().lower()
+
+    @property
+    def is_agent(self) -> bool:
+        return self.type == "agent"
 
 
 @dataclass
@@ -100,6 +110,8 @@ class Config:
                 base_url=e.get("base_url", ""),
                 enabled=bool(e.get("enabled", True)),
                 vendor=e.get("vendor", ""),
+                type=e.get("type", "http"),
+                provider=e.get("provider", "codebuddy"),
             )
             for e in d.get("endpoints", [])
         ]

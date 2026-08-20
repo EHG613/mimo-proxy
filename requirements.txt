@@ -2,3 +2,8 @@
 httpx>=0.24.0
 starlette>=0.27.0
 uvicorn>=0.20.0
+# 4.14.x 存在 cancel scope 回归，触发 StreamingResponse 结束时报错；锁定到稳定版本
+anyio<4.14,>=4.0
+
+# 内置 Agent endpoint（可选，仅 agent 类型 endpoint 需要；与 npm @tencent-ai/agent-sdk 同源）
+codebuddy-agent-sdk>=0.1.0

@@ -32,7 +32,10 @@ def _watch_parent() -> None:
 
     def _watch() -> None:
         while True:
-            time.sleep(1.0)
+            # 间隔拉长到 10s：太频繁的 os.getppid() 会与 anyio 子进程的
+            # child watcher 线程产生竞争，导致 agent 会话的 CLI stdout 读取
+            # 在首轮后中断（多轮复用失败）。ppid 检测是兜底手段，10s 足够。
+            time.sleep(10.0)
             if os.getppid() != parent:
                 logging.getLogger("client.watchdog").info(
                     "检测到父进程退出，sidecar 自动停止"
@@ -131,7 +134,8 @@ def main() -> int:
     for ep in cfg.endpoints:
         marker = "✓" if ep.name == cfg.default_name else " "
         state = "启用" if ep.enabled else "禁用"
-        print(f"   [{marker}] /{ep.name}/v1/chat/completions  ({state})  →  {ep.base_url}")
+        target = f"[agent:{ep.provider}]" if ep.is_agent else ep.base_url
+        print(f"   [{marker}] /{ep.name}/v1/chat/completions  ({state})  →  {target}")
     print()
     print(f"   Trae 配置地址: http://127.0.0.1:{cfg.port}/v1/chat/completions")
     print()

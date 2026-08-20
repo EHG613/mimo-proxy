@@ -416,6 +416,7 @@ body::before {
 .col-name { width: 150px; }
 .col-url  { width: auto; }
 .col-vendor { width: 120px; }
+.col-type { width: 90px; }
 .col-default { width: 56px; text-align: center; }
 .col-enabled { width: 56px; text-align: center; }
 .col-copy   { width: 56px; text-align: center; }
@@ -485,6 +486,37 @@ body::before {
 #endpoint-table td input[type="text"]:focus,
 #endpoint-table td input[type="url"]:focus {
   background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+/* ─── 类型下拉 ─── */
+
+#endpoint-table td select.type-select {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--glass-border-input);
+  border-radius: 6px;
+  background: var(--glass-bg-strong);
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 20px;
+  outline: none;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+#endpoint-table td select.type-select:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+#endpoint-table td select.type-select:focus {
+  border-color: var(--accent-border);
+  color: var(--text-primary);
+}
+
+#endpoint-table td select.type-select option {
+  background: #22355c;
   color: var(--text-primary);
 }
 

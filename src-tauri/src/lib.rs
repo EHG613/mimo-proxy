@@ -16,6 +16,18 @@ pub struct Endpoint {
     pub enabled: bool,
     #[serde(default)]
     pub vendor: String,
+    #[serde(default = "default_endpoint_type")]
+    pub r#type: String,
+    #[serde(default = "default_provider")]
+    pub provider: String,
+}
+
+fn default_endpoint_type() -> String {
+    "http".into()
+}
+
+fn default_provider() -> String {
+    "codebuddy".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +58,8 @@ impl Default for ProxyConfig {
                 base_url: "https://one-api-test.liangyihui.net:8080/v1".into(),
                 enabled: true,
                 vendor: String::new(),
+                r#type: "http".into(),
+                provider: "codebuddy".into(),
             }],
         }
     }

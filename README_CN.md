@@ -148,7 +148,8 @@ npm run build          # 生产构建（先构建 sidecar，再生成 .app / .dm
   "default_name": "default",
   "endpoints": [
     {"name": "default", "base_url": "https://one-api-test.liangyihui.net:8080/v1", "enabled": true, "vendor": "lyh"},
-    {"name": "prod",    "base_url": "https://api.xiaomimimo.com/v1",                "enabled": true, "vendor": ""}
+    {"name": "prod",    "base_url": "https://api.xiaomimimo.com/v1",                "enabled": true, "vendor": ""},
+    {"name": "agent",   "base_url": "", "enabled": true, "type": "agent", "provider": "codebuddy"}
   ]
 }
 ```
@@ -161,7 +162,10 @@ npm run build          # 生产构建（先构建 sidecar，再生成 .app / .dm
 | `cache_max_size` | `2000` | 最大缓存条目数 |
 | `cache_ttl` | `7200` | 缓存过期时间（秒） |
 | `default_name` | `default` | 默认 endpoint 的名称 |
-| `endpoints[]` | — | baseURL 列表，每个 endpoint 含 `name` / `base_url` / `enabled` / `vendor`（供应商前缀，用于「供应商/模型id」模型配置，可选，默认空） |
+| `endpoints[]` | — | baseURL 列表，每个 endpoint 含 `name` / `base_url` / `enabled` / `vendor` / `type` / `provider` |
+| `endpoints[].vendor` | 空 | 供应商前缀，用于「供应商/模型id」模型配置，可选 |
+| `endpoints[].type` | `http` | 类型：`http`（转发 HTTP 上游，默认）或 `agent`（内置 Agent SDK） |
+| `endpoints[].provider` | `codebuddy` | agent 类型的厂商 SDK 名称；http 类型忽略 |
 
 ### 路径路由
 
@@ -228,6 +232,33 @@ http://127.0.0.1:8899/prod/v1/chat/completions         # 指定 endpoint
 - `vendor` 为空（默认）时不剥离，模型 ID 原样转发，行为与之前完全一致
 - `vendor` 不允许包含 `/`（它是「供应商/模型id」的分隔符）
 - 前缀剥离只针对请求实际路由到的 endpoint 配置的 vendor
+
+### 内置 Agent endpoint（codebuddy-agent-sdk）
+
+除转发 HTTP 上游外，代理内置「Agent endpoint」能力：把 endpoint 的 `type` 设为 `agent` 后，该路径不再请求 HTTP 上游，而是调用本机 CodeBuddy Agent SDK（Python 包 `codebuddy-agent-sdk`，与 npm `@tencent-ai/agent-sdk` 同源），将其输出转为 OpenAI 兼容的流式响应返回给工具。
+
+| 场景 | 配置方式 |
+|------|----------|
+| endpoint 配置 | `type` 填 `agent`，`base_url` 留空，`provider` 填 `codebuddy`（缺省即 codebuddy） |
+| 工具调用地址 | 与普通 endpoint 相同：`http://127.0.0.1:{port}/{name}/v1/chat/completions` |
+| 请求格式 | 标准 OpenAI `/chat/completions`，流式（`stream: true`）返回 SSE |
+
+示例：
+
+```bash
+curl -N http://127.0.0.1:8899/agent/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v3.1","stream":true,"messages":[{"role":"user","content":"解释什么是递归"}]}'
+```
+
+行为说明：
+
+- **多轮上下文**：默认按 `endpoint 名 + model` 维度复用会话，同一会话内多轮上下文自动保持；也可通过请求头 `X-Session-Id` 显式指定会话 ID（不同会话彼此隔离）。
+- **消息映射**：取最后一条 `user` 消息作为本轮内容；首轮存在 `system` 消息时前缀拼接。
+- **流式输出**：Agent 的文本增量逐块转为 OpenAI `choices[].delta.content` SSE 帧，以 `data: [DONE]` 收尾。
+- **错误处理**：SDK 未安装 / CLI 未找到 / 连接失败时返回 502 与中文 `message`。
+- **依赖**：需安装 `codebuddy-agent-sdk`（已列入 `requirements.txt`）；生产打包后需保证本机 CodeBuddy CLI 可用，必要时用 `CODEBUDDY_CLI_PATH` 环境变量指定 CLI 路径。
+- **扩展性**：通过 `client/agent_providers.py` 的 Provider 抽象层接入其它厂商 SDK，新增 provider 即可，不改动路由。
 
 ## 错误信息
 

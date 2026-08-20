@@ -60,6 +60,27 @@ function renderTable($tbody) {
     tdVendor.appendChild(inpVendor);
     tr.appendChild(tdVendor);
 
+    // 类型（http：转发 HTTP 上游；agent：内置 Agent SDK）
+    const tdType = document.createElement("td");
+    tdType.className = "col-type";
+    const selType = document.createElement("select");
+    selType.className = "type-select";
+    ["http", "agent"].forEach((t) => {
+      const opt = document.createElement("option");
+      opt.value = t;
+      opt.textContent = t === "http" ? "HTTP" : "Agent";
+      opt.selected = (ep.type || "http") === t;
+      selType.appendChild(opt);
+    });
+    selType.addEventListener("change", () => {
+      config.endpoints[i].type = selType.value;
+      if (selType.value === "agent") {
+        config.endpoints[i].provider = config.endpoints[i].provider || "codebuddy";
+      }
+    });
+    tdType.appendChild(selType);
+    tr.appendChild(tdType);
+
     // 默认
     const tdDef = document.createElement("td");
     tdDef.className = "col-default";
@@ -236,6 +257,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       base_url: "https://api.xiaomimimo.com/v1",
       enabled: true,
       vendor: "",
+      type: "http",
+      provider: "codebuddy",
     });
     renderTable($tbody);
     $tbody.parentElement.scrollTop = $tbody.parentElement.scrollHeight;
@@ -269,10 +292,15 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (reserved.has(n)) { alert(`名称 "${n}" 是保留字`); return; }
       if (seen.has(n)) { alert(`名称 "${n}" 重复`); return; }
       seen.add(n);
-      if (!ep.base_url) { alert(`"${n}" 的 BaseURL 不能为空`); return; }
-      if (!ep.base_url.startsWith("http://") && !ep.base_url.startsWith("https://")) {
-        alert(`"${n}" 的 BaseURL 必须以 http:// 或 https:// 开头`);
-        return;
+      const isAgent = (ep.type || "http") === "agent";
+      if (!isAgent) {
+        if (!ep.base_url) { alert(`"${n}" 的 BaseURL 不能为空`); return; }
+        if (!ep.base_url.startsWith("http://") && !ep.base_url.startsWith("https://")) {
+          alert(`"${n}" 的 BaseURL 必须以 http:// 或 https:// 开头`);
+          return;
+        }
+      } else {
+        ep.base_url = "";
       }
       if (ep.vendor && ep.vendor.includes("/")) {
         alert(`"${n}" 的供应商不能包含 "/"（与「供应商/模型id」分隔符冲突）`);
