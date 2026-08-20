@@ -260,19 +260,6 @@ def resolve_endpoint(config: Config, path: str) -> tuple[Endpoint | None, str, s
     return default_ep, path, None
 
 
-def strip_model_vendor(model: str, vendor: str) -> tuple[str, bool]:
-    """按 endpoint 的 vendor 剥离模型 id 前缀。
-
-    客户端以「供应商/模型id」配置模型（如 lyh/deepseek-v4-flash）来避开
-    与工具内置模型的 id 冲突；转发前还原为真实模型 id（deepseek-v4-flash）。
-
-    返回 (真实模型 id, 是否发生剥离)。vendor 为空或不匹配前缀时原样返回。
-    """
-    if vendor and model.startswith(f"{vendor}/"):
-        return model[len(vendor) + 1:], True
-    return model, False
-
-
 # ─── SSE 流式处理 ──────────────────────────────────────────────
 
 def _sse(data: str) -> bytes:
@@ -506,15 +493,6 @@ async def chat_completions(request: Request):
     if injected or degraded:
         log.info("🔧 [%s] Injected=%d, Degraded=%d", endpoint.name, injected, degraded)
 
-    # 供应商前缀剥离：客户端可配「vendor/模型id」避免与工具内置模型冲突，转发前还原真实模型 id
-    model = body.get("model", "")
-    if model:
-        real_model, stripped = strip_model_vendor(str(model), endpoint.vendor)
-        if stripped:
-            log.info("🏷️  [%s] Model '%s' → '%s' (stripped vendor '%s')",
-                     endpoint.name, model, real_model, endpoint.vendor)
-            body["model"] = real_model
-
     headers = {}
     auth = request.headers.get("authorization")
     if auth:
@@ -623,13 +601,12 @@ async def root(request: Request):
     config = _state.config
     return JSONResponse({
         "status": "running",
-        "service": "MiMo Reasoning Content Proxy v2.1.2",
+        "service": "MiMo Reasoning Content Proxy v2.0",
         "host": config.host,
         "port": config.port,
         "default_name": config.default_name,
         "endpoints": [
-            {"name": e.name, "base_url": e.base_url, "enabled": e.enabled, "vendor": e.vendor,
-             "is_default": e.name == config.default_name}
+            {"name": e.name, "base_url": e.base_url, "enabled": e.enabled, "is_default": e.name == config.default_name}
             for e in config.endpoints
         ],
         "routes_hint": "Use /{name}/v1/chat/completions to target a specific endpoint, or /v1/chat/completions for the default.",
