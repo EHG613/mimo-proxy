@@ -1,6 +1,6 @@
 {
   "productName": "MiMo Proxy",
-  "version": "2.1.2",
+  "version": "2.2.0",
   "identifier": "dev.mimo.proxy",
   "build": {
     "frontendDist": "../src",
