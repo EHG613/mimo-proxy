@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -122,23 +123,55 @@ class CodeBuddySession(AgentSession):
         """
         await self._ensure_connected()
         saw_text_delta = False
+        t_start = time.monotonic()
+        first_token_at: float | None = None
+        delta_count = 0
+        char_count = 0
+        t_query_sent: float | None = None
+        first_msg_at: float | None = None
+        first_msg_kind: str | None = None
+        # 首个 text_delta 之前收到的非文本事件（思考/reasoning 等）类型分布
+        pre_text_events: dict[str, int] = {}
+        pre_text_first_at: dict[str, float] = {}
         try:
             await self._client.query(prompt)
+            t_query_sent = time.monotonic()
             async for message in self._client.receive_response():
+                if first_msg_at is None:
+                    first_msg_at = time.monotonic()
+                    first_msg_kind = type(message).__name__
                 if isinstance(message, self._stream_event_cls):
                     ev = message.event or {}
-                    if ev.get("type") == "content_block_delta":
+                    ev_type = ev.get("type")
+                    if ev_type == "content_block_delta":
                         delta = ev.get("delta") or {}
-                        if delta.get("type") == "text_delta":
+                        delta_type = delta.get("type")
+                        if delta_type == "text_delta":
                             text = delta.get("text")
                             if text:
                                 saw_text_delta = True
+                                if first_token_at is None:
+                                    first_token_at = time.monotonic()
+                                delta_count += 1
+                                char_count += len(text)
                                 yield text
+                        elif not saw_text_delta:
+                            kind = f"{ev_type}/{delta_type}"
+                            pre_text_events[kind] = pre_text_events.get(kind, 0) + 1
+                            pre_text_first_at.setdefault(kind, time.monotonic() - t_start)
+                    elif not saw_text_delta:
+                        kind = f"{ev_type}/*"
+                        pre_text_events[kind] = pre_text_events.get(kind, 0) + 1
+                        pre_text_first_at.setdefault(kind, time.monotonic() - t_start)
                 elif isinstance(message, self._assistant_cls):
                     # 流式增量已推送过时，完整消息冗余；仅在未收到增量时兜底
                     if not saw_text_delta:
                         for block in message.content:
                             if isinstance(block, self._text_cls) and block.text:
+                                if first_token_at is None:
+                                    first_token_at = time.monotonic()
+                                delta_count += 1
+                                char_count += len(block.text)
                                 yield block.text
                 elif isinstance(message, self._result_cls):
                     if getattr(message, "subtype", "success") != "success":
@@ -158,6 +191,26 @@ class CodeBuddySession(AgentSession):
         except Exception as e:
             # CLI 未找到 / 连接失败 / SDK 内部错误等统一包装，供上层转成 502 中文错误帧
             raise AgentError(f"调用 Agent 失败：{type(e).__name__}: {e}") from e
+        finally:
+            total = time.monotonic() - t_start
+            ttft = (first_token_at - t_start) if first_token_at is not None else None
+            query_cost = (t_query_sent - t_start) if t_query_sent else None
+            first_msg_delay = (first_msg_at - t_start) if first_msg_at else None
+            pre_text_summary = ", ".join(
+                f"{k}:{v}@{pre_text_first_at.get(k, 0):.1f}s"
+                for k, v in sorted(pre_text_events.items())
+            )
+            log.info(
+                "⏱️ [agent] SDK 流结束: 总耗时=%.2fs TTFT=%s query耗时=%s 首条消息=%s(%s) 思考期事件=[%s] 增量=%d 字符=%d",
+                total,
+                f"{ttft:.2f}s" if ttft is not None else "N/A",
+                f"{query_cost:.3f}s" if query_cost is not None else "N/A",
+                f"{first_msg_delay:.2f}s" if first_msg_delay is not None else "N/A",
+                first_msg_kind or "-",
+                pre_text_summary or "-",
+                delta_count,
+                char_count,
+            )
 
     async def close(self) -> None:
         try:
@@ -188,7 +241,9 @@ class CodeBuddyProvider(AgentProvider):
 
         options = CodeBuddyAgentOptions()
         if model:
-            options.model = model
+            # codebuddy 后端只认纯模型名，剥离调用方为唯一性加的供应商前缀
+            # 如 codebuddy/deepseek-v4-flash → deepseek-v4-flash
+            options.model = model.rsplit("/", 1)[-1]
         if cwd:
             options.cwd = cwd
         # 无人值守的 sidecar 场景下跳过交互式权限确认，语义等价于用户已授权。

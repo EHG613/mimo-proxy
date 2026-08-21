@@ -228,6 +228,19 @@ def cache_reasoning_from_message(msg: dict, max_size: int) -> None:
         log.info("📦 Cached reasoning [%s] (%d chars) tc_ids=%s", h[:8], len(rc), tc_ids)
 
 
+def _strip_model_prefix(model: str, endpoint: Endpoint) -> str:
+    """剥离调用方为路由唯一性加的供应商前缀，如 airouter/gpt-5.6-sol → gpt-5.6-sol。
+
+    仅当前缀与当前 endpoint 的 name 或 vendor 精确匹配时才剥离，避免误伤
+    本身带 `/` 的第三方模型名（如 meta-llama/...）；不带前缀的模型名原样返回。
+    """
+    prefixes = [p for p in (endpoint.name, endpoint.vendor) if p]
+    for prefix in prefixes:
+        if model.startswith(prefix + "/"):
+            return model[len(prefix) + 1:]
+    return model
+
+
 # ─── 路径解析 ──────────────────────────────────────────────────
 
 # 这些路径段不能作为 endpoint 名称（保留字）
@@ -495,6 +508,10 @@ async def chat_completions(request: Request):
         api_key = _extract_api_key(request)
         return await _handle_agent_chat(endpoint, body, api_key)
 
+    # 剥离调用方为路由唯一性加的供应商前缀，如 airouter/gpt-5.6-sol → gpt-5.6-sol
+    if body.get("model"):
+        body["model"] = _strip_model_prefix(body["model"], endpoint)
+
     messages = body.get("messages", [])
     injected, degraded = inject_reasoning(messages, config.cache_ttl, config.cache_max_size)
     if injected or degraded:
@@ -589,8 +606,11 @@ def _extract_api_key(request: Request) -> str | None:
 
 async def _agent_stream(manager, entry, endpoint_name: str, prompt: str, model: str | None, chat_id: str):
     """把 Agent 会话的文本增量转成 OpenAI SSE 字节流，含 [DONE] 收尾。"""
+    t_start = time.monotonic()
+    frame_count = 0
     try:
         async for frame in manager.stream(entry, prompt, model, chat_id):
+            frame_count += 1
             yield _sse(json.dumps(frame, ensure_ascii=False))
         yield _sse(json.dumps(done_frame(chat_id, model or "agent"), ensure_ascii=False))
         yield _sse("[DONE]")
@@ -598,6 +618,8 @@ async def _agent_stream(manager, entry, endpoint_name: str, prompt: str, model: 
         log.error("❌ [%s] Agent 流式执行失败: %s", endpoint_name, e.message)
         yield _sse(json.dumps({"error": {"message": e.message, "code": "502"}}, ensure_ascii=False))
         yield _sse("[DONE]")
+    finally:
+        log.info("⏱️ [%s] 流式转发完成: 总耗时=%.2fs 帧数=%d", endpoint_name, time.monotonic() - t_start, frame_count)
 
 
 async def _handle_agent_chat(endpoint: Endpoint, body: dict, api_key: str | None):
@@ -616,6 +638,7 @@ async def _handle_agent_chat(endpoint: Endpoint, body: dict, api_key: str | None
     messages = body.get("messages", [])
     model = body.get("model")
     is_stream = bool(body.get("stream", False))
+    log.info("🤖 [%s] agent 请求: model=%s stream=%s", endpoint.name, model, is_stream)
 
     prompt = extract_prompt(messages)
     if not prompt:
@@ -623,7 +646,9 @@ async def _handle_agent_chat(endpoint: Endpoint, body: dict, api_key: str | None
 
     chat_id = new_chat_id()
     try:
+        t_acquire = time.monotonic()
         entry = await manager.acquire(endpoint, model, api_key)
+        log.info("🤖 [%s] acquire 会话耗时=%.0fms (model=%s)", endpoint.name, (time.monotonic() - t_acquire) * 1000, model)
     except AgentError as e:
         log.warning("🚫 [%s] Agent 会话创建失败: %s", endpoint.name, e.message)
         return JSONResponse({"error": {"message": e.message, "code": "502"}}, status_code=502)
@@ -637,10 +662,12 @@ async def _handle_agent_chat(endpoint: Endpoint, body: dict, api_key: str | None
 
     # 非流式：聚合流式输出后一次性返回
     try:
+        t_agg = time.monotonic()
         parts: list[str] = []
         async for frame in manager.stream(entry, prompt, model, chat_id):
             parts.append(frame["choices"][0]["delta"].get("content") or "")
         text = "".join(parts)
+        log.info("⏱️ [%s] 非流式聚合完成: 总耗时=%.2fs 文本长度=%d", endpoint.name, time.monotonic() - t_agg, len(text))
         return JSONResponse({
             "id": chat_id,
             "object": "chat.completion",
@@ -659,6 +686,29 @@ async def _handle_agent_chat(endpoint: Endpoint, body: dict, api_key: str | None
         return JSONResponse({"error": {"message": e.message, "code": "502"}}, status_code=502)
 
 
+# agent 类型 endpoint 后端（CodeBuddy）当前支持的模型清单。
+# 来源：后端报错信息中 "Currently supported models for your account"，
+# 账号支持的模型若有变动需同步更新。
+_AGENT_MODEL_IDS = [
+    "custom:kimi-k2.5-wb",
+    "custom:glm-5",
+    "custom:qwen3.7-plus",
+    "custom:glm-4.7",
+    "hy3",
+    "glm-5.3",
+    "glm-5.2",
+    "glm-5.1",
+    "glm-5v-turbo",
+    "minimax-m3-pay",
+    "minimax-m2.7",
+    "kimi-k3-2",
+    "kimi-k2.7",
+    "kimi-k2.6",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+]
+
+
 async def list_models(request: Request):
     state = _state
     config = state.config
@@ -668,6 +718,14 @@ async def list_models(request: Request):
         return JSONResponse({"error": err or "No endpoint"}, status_code=503)
     if not endpoint.enabled:
         return JSONResponse({"error": f"Endpoint '{endpoint.name}' is disabled"}, status_code=503)
+
+    # agent 类型：无 HTTP 上游，直接返回后端支持的模型清单
+    if endpoint.is_agent:
+        data = [
+            {"id": mid, "object": "model", "created": int(time.time()), "owned_by": endpoint.provider}
+            for mid in _AGENT_MODEL_IDS
+        ]
+        return JSONResponse({"object": "list", "data": data})
 
     headers = {}
     auth = request.headers.get("authorization")
